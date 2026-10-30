@@ -1,0 +1,13 @@
+normalization:
+  lower_percentile: 1.0
+  upper_percentile: 99.0
+
+morphology:
+  # Selected by mean Dice on the 24 official development scans only.
+  opening_radius_fraction: 0.008
+  closing_radius_fraction: 0.004
+  minimum_component_area_fraction: 0.005
+
+central_component:
+  centrality_weight: 0.75
+
