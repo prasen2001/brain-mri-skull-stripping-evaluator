@@ -1,0 +1,21 @@
+# Downloaded datasets and archives
+data/raw/
+data/processed/
+
+# Generated evaluation artifacts
+outputs/
+
+# Local environments and Python caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
