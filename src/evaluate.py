@@ -17,8 +17,9 @@ import pandas as pd
 import yaml
 
 from src.dataset import discover_pairs, load_pair, validate_pairs
-from src.metrics import compute_binary_metrics
+from src.metrics import compute_binary_metrics, compute_boundary_metrics
 from src.preprocessing import robust_normalize
+from src.quality import QualityConfig, mean_method_disagreement, prediction_diagnostics
 from src.segmentation import METHOD_NAMES, MorphologyConfig, segment
 from src.visualization import create_all_visualizations
 
@@ -43,16 +44,22 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--centrality-weight", type=float, default=None)
     parser.add_argument("--lower-percentile", type=float, default=None)
     parser.add_argument("--upper-percentile", type=float, default=None)
+    parser.add_argument("--boundary-tolerance-pixels", type=float, default=None)
+    parser.add_argument("--bootstrap-samples", type=int, default=None)
     return parser
 
 
-def _load_config(args: argparse.Namespace) -> tuple[MorphologyConfig, float, float, dict[str, Any]]:
+def _load_config(
+    args: argparse.Namespace,
+) -> tuple[MorphologyConfig, QualityConfig, float, float, float, int, dict[str, Any]]:
     if not args.config.is_file():
         raise FileNotFoundError(f"Configuration file does not exist: {args.config}")
     raw = yaml.safe_load(args.config.read_text(encoding="utf-8")) or {}
     normalization = raw.get("normalization", {})
     morphology = raw.get("morphology", {})
     central = raw.get("central_component", {})
+    quality = raw.get("quality", {})
+    evaluation = raw.get("evaluation", {})
 
     def chosen(cli_value: float | None, section: dict[str, Any], key: str, default: float) -> float:
         return float(cli_value if cli_value is not None else section.get(key, default))
@@ -76,6 +83,32 @@ def _load_config(args: argparse.Namespace) -> tuple[MorphologyConfig, float, flo
             args.centrality_weight, central, "centrality_weight", 0.75
         ),
     )
+    quality_config = QualityConfig(
+        minimum_area_fraction=float(quality.get("minimum_area_fraction", 0.03)),
+        maximum_area_fraction=float(quality.get("maximum_area_fraction", 0.80)),
+        maximum_centroid_distance=float(quality.get("maximum_centroid_distance", 0.55)),
+        maximum_border_contact_fraction=float(
+            quality.get("maximum_border_contact_fraction", 0.65)
+        ),
+        maximum_component_count=int(quality.get("maximum_component_count", 20)),
+        minimum_largest_component_fraction=float(
+            quality.get("minimum_largest_component_fraction", 0.80)
+        ),
+        maximum_method_disagreement=float(
+            quality.get("maximum_method_disagreement", 0.35)
+        ),
+    )
+    boundary_tolerance = chosen(
+        args.boundary_tolerance_pixels,
+        evaluation,
+        "boundary_tolerance_pixels",
+        1.0,
+    )
+    bootstrap_samples = int(
+        args.bootstrap_samples
+        if args.bootstrap_samples is not None
+        else evaluation.get("bootstrap_samples", 1000)
+    )
     effective = {
         "normalization": {"lower_percentile": lower, "upper_percentile": upper},
         "morphology": {
@@ -84,8 +117,29 @@ def _load_config(args: argparse.Namespace) -> tuple[MorphologyConfig, float, flo
             "minimum_component_area_fraction": config.minimum_component_area_fraction,
         },
         "central_component": {"centrality_weight": config.centrality_weight},
+        "quality": {
+            "minimum_area_fraction": quality_config.minimum_area_fraction,
+            "maximum_area_fraction": quality_config.maximum_area_fraction,
+            "maximum_centroid_distance": quality_config.maximum_centroid_distance,
+            "maximum_border_contact_fraction": quality_config.maximum_border_contact_fraction,
+            "maximum_component_count": quality_config.maximum_component_count,
+            "minimum_largest_component_fraction": quality_config.minimum_largest_component_fraction,
+            "maximum_method_disagreement": quality_config.maximum_method_disagreement,
+        },
+        "evaluation": {
+            "boundary_tolerance_pixels": boundary_tolerance,
+            "bootstrap_samples": bootstrap_samples,
+        },
     }
-    return config, lower, upper, effective
+    return (
+        config,
+        quality_config,
+        lower,
+        upper,
+        boundary_tolerance,
+        bootstrap_samples,
+        effective,
+    )
 
 
 def _package_versions() -> dict[str, str]:
@@ -99,12 +153,30 @@ def _package_versions() -> dict[str, str]:
     return versions
 
 
-def _summarize(metrics: pd.DataFrame) -> pd.DataFrame:
-    score_columns = ["dice", "iou", "precision", "sensitivity", "specificity", "pixel_accuracy"]
+SUMMARY_METRICS = [
+    "dice",
+    "iou",
+    "precision",
+    "sensitivity",
+    "specificity",
+    "pixel_accuracy",
+    "surface_dice",
+    "hd95_pixels",
+    "assd_pixels",
+]
+
+
+def _summarize_grouped(
+    metrics: pd.DataFrame, group_columns: list[str]
+) -> pd.DataFrame:
+    """Aggregate overlap, boundary, and timing metrics for requested groups."""
     rows: list[dict[str, Any]] = []
-    for method, group in metrics.groupby("method", sort=False):
-        row: dict[str, Any] = {"method": method, "n_images": int(len(group))}
-        for column in score_columns:
+    group_key: str | list[str] = group_columns[0] if len(group_columns) == 1 else group_columns
+    for keys, group in metrics.groupby(group_key, sort=False):
+        key_values = (keys,) if len(group_columns) == 1 else keys
+        row: dict[str, Any] = dict(zip(group_columns, key_values, strict=True))
+        row["n_images"] = int(len(group))
+        for column in SUMMARY_METRICS:
             values = group[column]
             for statistic in ("mean", "median", "std", "min", "max"):
                 row[f"{column}_{statistic}"] = float(getattr(values, statistic)())
@@ -114,13 +186,91 @@ def _summarize(metrics: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _summarize(metrics: pd.DataFrame) -> pd.DataFrame:
+    return _summarize_grouped(metrics, ["method"])
+
+
+def _bootstrap_confidence_intervals(
+    metrics: pd.DataFrame, sample_count: int, seed: int
+) -> pd.DataFrame:
+    """Compute deterministic scan-level percentile CIs for mean metrics."""
+    rows: list[dict[str, Any]] = []
+    for method, group in metrics.groupby("method", sort=False):
+        ordered = group.sort_values("identifier")
+        rng = np.random.default_rng(seed)
+        indices = rng.integers(0, len(ordered), size=(sample_count, len(ordered)))
+        for metric in SUMMARY_METRICS:
+            values = ordered[metric].to_numpy(dtype=float)
+            bootstrap_means = values[indices].mean(axis=1)
+            rows.append(
+                {
+                    "method": method,
+                    "metric": metric,
+                    "mean": float(values.mean()),
+                    "ci_95_lower": float(np.percentile(bootstrap_means, 2.5)),
+                    "ci_95_upper": float(np.percentile(bootstrap_means, 97.5)),
+                    "bootstrap_samples": sample_count,
+                    "seed": seed,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _quality_summary(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Summarize warning frequency and observed Dice for audit purposes."""
+    rows: list[dict[str, Any]] = []
+    for method, group in metrics.groupby("method", sort=False):
+        warned = group["has_quality_warning"].astype(bool)
+        warning_counts: dict[str, int] = {}
+        for warning_text in group.loc[warned, "quality_warnings"]:
+            for warning in str(warning_text).split(";"):
+                warning_counts[warning] = warning_counts.get(warning, 0) + 1
+        rows.append(
+            {
+                "method": method,
+                "n_images": int(len(group)),
+                "n_warned": int(warned.sum()),
+                "warning_rate": float(warned.mean()),
+                "mean_warning_count": float(group["quality_warning_count"].mean()),
+                "mean_dice_warned": float(group.loc[warned, "dice"].mean())
+                if warned.any()
+                else float("nan"),
+                "mean_dice_not_warned": float(group.loc[~warned, "dice"].mean())
+                if (~warned).any()
+                else float("nan"),
+                "warning_type_counts": ";".join(
+                    f"{name}:{count}" for name, count in sorted(warning_counts.items())
+                )
+                or "none",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _dataset_source(identifier: str) -> str:
+    """Return the official source-family prefix embedded in a scan identifier."""
+    return identifier.split("_", maxsplit=1)[0].upper()
+
+
 def run(args: argparse.Namespace) -> None:
     """Validate inputs, evaluate methods, save tables, and render figures."""
     if args.limit is not None and args.limit <= 0:
         raise ValueError("--limit must be a positive integer.")
     random.seed(args.seed)
     np.random.seed(args.seed)
-    config, lower, upper, effective_config = _load_config(args)
+    (
+        config,
+        quality_config,
+        lower,
+        upper,
+        boundary_tolerance,
+        bootstrap_samples,
+        effective_config,
+    ) = _load_config(args)
+    if boundary_tolerance < 0:
+        raise ValueError("--boundary-tolerance-pixels must be non-negative.")
+    if bootstrap_samples <= 0:
+        raise ValueError("--bootstrap-samples must be a positive integer.")
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     discovered, discovery_invalid = discover_pairs(args.data_dir, args.subset, args.seed)
@@ -139,21 +289,42 @@ def run(args: argparse.Namespace) -> None:
         try:
             image, reference = load_pair(pair)
             normalized = robust_normalize(image, lower, upper)
+            predictions: dict[str, np.ndarray] = {}
+            thresholds: dict[str, float] = {}
+            timings: dict[str, float] = {}
             for method in METHOD_NAMES:
                 started = time.perf_counter()
                 prediction, threshold = segment(normalized, method, config)
-                elapsed = time.perf_counter() - started
+                timings[method] = time.perf_counter() - started
+                predictions[method] = prediction
+                thresholds[method] = threshold
+
+            for method in METHOD_NAMES:
+                prediction = predictions[method]
                 metric_values = compute_binary_metrics(prediction, reference)
+                boundary_values = compute_boundary_metrics(
+                    prediction, reference, boundary_tolerance
+                )
+                disagreement = mean_method_disagreement(
+                    prediction,
+                    [predictions[other] for other in METHOD_NAMES if other != method],
+                )
+                diagnostics = prediction_diagnostics(
+                    prediction, disagreement, quality_config
+                )
                 records.append(
                     {
                         "identifier": pair.identifier,
+                        "dataset_source": _dataset_source(pair.identifier),
                         "subset": pair.subset,
                         "method": method,
                         "image_height": int(image.shape[0]),
                         "image_width": int(image.shape[1]),
-                        "otsu_threshold": threshold,
+                        "otsu_threshold": thresholds[method],
                         **metric_values,
-                        "processing_time_seconds": elapsed,
+                        **boundary_values,
+                        **diagnostics,
+                        "processing_time_seconds": timings[method],
                     }
                 )
             evaluated_pairs.append(pair)
@@ -168,6 +339,16 @@ def run(args: argparse.Namespace) -> None:
     metrics.to_csv(args.output_dir / "per_image_metrics.csv", index=False)
     summary = _summarize(metrics)
     summary.to_csv(args.output_dir / "summary_metrics.csv", index=False)
+    source_summary = _summarize_grouped(metrics, ["dataset_source", "method"])
+    source_summary.to_csv(args.output_dir / "source_summary_metrics.csv", index=False)
+    confidence_intervals = _bootstrap_confidence_intervals(
+        metrics, bootstrap_samples, args.seed
+    )
+    confidence_intervals.to_csv(
+        args.output_dir / "bootstrap_confidence_intervals.csv", index=False
+    )
+    quality_summary = _quality_summary(metrics)
+    quality_summary.to_csv(args.output_dir / "quality_summary.csv", index=False)
     if invalid:
         pd.DataFrame(invalid).to_csv(args.output_dir / "invalid_pairs.csv", index=False)
 

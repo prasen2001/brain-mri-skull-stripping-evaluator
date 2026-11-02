@@ -22,3 +22,7 @@ quality:
   minimum_largest_component_fraction: 0.80
   maximum_method_disagreement: 0.35
 
+evaluation:
+  boundary_tolerance_pixels: 1.0
+  bootstrap_samples: 1000
+

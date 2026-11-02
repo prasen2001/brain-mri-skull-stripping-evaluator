@@ -114,5 +114,5 @@ def prediction_diagnostics(
         "method_disagreement": float(method_disagreement),
         "quality_warning_count": len(warnings),
         "has_quality_warning": bool(warnings),
-        "quality_warnings": ";".join(warnings),
+        "quality_warnings": ";".join(warnings) if warnings else "none",
     }
