@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from src.metrics import compute_binary_metrics
+from src.metrics import compute_binary_metrics, compute_boundary_metrics
 
 
 def test_perfect_overlap() -> None:
@@ -68,4 +68,33 @@ def test_both_masks_empty() -> None:
 def test_shape_mismatch_is_rejected() -> None:
     with pytest.raises(ValueError, match="does not match"):
         compute_binary_metrics(np.zeros((2, 2)), np.zeros((3, 2)))
+
+
+def test_boundary_metrics_for_identical_masks() -> None:
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[2:6, 2:6] = True
+    result = compute_boundary_metrics(mask, mask)
+    assert result == {"surface_dice": 1.0, "hd95_pixels": 0.0, "assd_pixels": 0.0}
+
+
+def test_boundary_metrics_for_shifted_masks() -> None:
+    prediction = np.zeros((10, 10), dtype=bool)
+    reference = np.zeros((10, 10), dtype=bool)
+    prediction[2:6, 2:6] = True
+    reference[2:6, 4:8] = True
+    result = compute_boundary_metrics(prediction, reference, tolerance_pixels=0)
+    assert 0 < result["surface_dice"] < 1
+    assert result["hd95_pixels"] > 0
+    assert result["assd_pixels"] > 0
+
+
+def test_boundary_metrics_for_empty_masks() -> None:
+    empty = np.zeros((3, 4), dtype=bool)
+    nonempty = empty.copy()
+    nonempty[1, 1] = True
+    assert compute_boundary_metrics(empty, empty)["surface_dice"] == 1.0
+    result = compute_boundary_metrics(nonempty, empty)
+    assert result["surface_dice"] == 0.0
+    assert result["hd95_pixels"] == 5.0
+    assert result["assd_pixels"] == 5.0
 

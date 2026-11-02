@@ -11,3 +11,14 @@ morphology:
 central_component:
   centrality_weight: 0.75
 
+# Prediction-only warning thresholds. These flag masks for review; they do not
+# use ground truth and do not automatically declare a prediction incorrect.
+quality:
+  minimum_area_fraction: 0.03
+  maximum_area_fraction: 0.80
+  maximum_centroid_distance: 0.55
+  maximum_border_contact_fraction: 0.65
+  maximum_component_count: 20
+  minimum_largest_component_fraction: 0.80
+  maximum_method_disagreement: 0.35
+

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TypeAlias
 
 import numpy as np
+from scipy import ndimage as ndi
 
 MetricValue: TypeAlias = int | float
 
@@ -53,5 +54,70 @@ def compute_binary_metrics(
         "sensitivity": _safe_ratio(tp, ref_count, 1.0),
         "specificity": _safe_ratio(tn, tn + fp, 1.0),
         "pixel_accuracy": _safe_ratio(tp + tn, total, 1.0),
+    }
+
+
+def _surface(mask: np.ndarray) -> np.ndarray:
+    """Return one-pixel-wide inner boundary pixels for a binary mask."""
+    binary = np.asarray(mask, dtype=bool)
+    if not binary.any():
+        return np.zeros(binary.shape, dtype=bool)
+    eroded = ndi.binary_erosion(
+        binary, structure=np.ones((3, 3), dtype=bool), border_value=0
+    )
+    return binary & ~eroded
+
+
+def compute_boundary_metrics(
+    prediction: np.ndarray,
+    reference: np.ndarray,
+    tolerance_pixels: float = 1.0,
+) -> dict[str, float]:
+    """Compute surface Dice, robust Hausdorff distance, and ASSD in pixels.
+
+    Surface Dice measures the fraction of boundary pixels lying within the
+    requested tolerance of the other boundary. HD95 is the 95th percentile of
+    symmetric boundary distances, making it less sensitive than maximum
+    Hausdorff distance to one extreme pixel. ASSD is the average symmetric
+    surface distance. Distances are in pixels because this 2D benchmark mixes
+    scan geometries and evaluates the distributed pixel arrays directly.
+
+    Two empty masks are a perfect boundary match. When exactly one mask is
+    empty, overlap is zero and both distance metrics receive the image diagonal
+    as a finite, explicit worst-case penalty.
+    """
+    if prediction.shape != reference.shape:
+        raise ValueError(
+            f"Prediction shape {prediction.shape} does not match "
+            f"reference shape {reference.shape}."
+        )
+    if tolerance_pixels < 0:
+        raise ValueError("tolerance_pixels must be non-negative.")
+
+    pred_surface = _surface(np.asarray(prediction, dtype=bool))
+    ref_surface = _surface(np.asarray(reference, dtype=bool))
+    pred_count = int(pred_surface.sum())
+    ref_count = int(ref_surface.sum())
+    if pred_count == 0 and ref_count == 0:
+        return {"surface_dice": 1.0, "hd95_pixels": 0.0, "assd_pixels": 0.0}
+    if pred_count == 0 or ref_count == 0:
+        diagonal = float(np.hypot(*prediction.shape))
+        return {
+            "surface_dice": 0.0,
+            "hd95_pixels": diagonal,
+            "assd_pixels": diagonal,
+        }
+
+    distance_to_ref = ndi.distance_transform_edt(~ref_surface)
+    distance_to_pred = ndi.distance_transform_edt(~pred_surface)
+    pred_to_ref = distance_to_ref[pred_surface]
+    ref_to_pred = distance_to_pred[ref_surface]
+    symmetric_distances = np.concatenate((pred_to_ref, ref_to_pred))
+    within_tolerance = int(np.count_nonzero(pred_to_ref <= tolerance_pixels))
+    within_tolerance += int(np.count_nonzero(ref_to_pred <= tolerance_pixels))
+    return {
+        "surface_dice": float(within_tolerance / (pred_count + ref_count)),
+        "hd95_pixels": float(np.percentile(symmetric_distances, 95)),
+        "assd_pixels": float(symmetric_distances.mean()),
     }
 
