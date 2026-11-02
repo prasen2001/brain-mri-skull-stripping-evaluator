@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 import yaml
 
 from src.dataset import discover_pairs, load_pair_with_spacing, validate_pairs
@@ -166,6 +167,8 @@ SUMMARY_METRICS = [
     "hd95_mm",
     "assd_mm",
 ]
+PAIRED_METRICS = ["dice", "iou", "surface_dice", "hd95_mm", "assd_mm"]
+HIGHER_IS_BETTER = {"dice", "iou", "surface_dice"}
 
 
 def _summarize_grouped(
@@ -247,6 +250,98 @@ def _quality_summary(metrics: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _holm_adjust(p_values: list[float]) -> list[float]:
+    """Return Holm-adjusted p-values while preserving original order."""
+    order = np.argsort(p_values)
+    adjusted = np.empty(len(p_values), dtype=float)
+    running_maximum = 0.0
+    count = len(p_values)
+    for rank, original_index in enumerate(order):
+        candidate = min(1.0, (count - rank) * p_values[original_index])
+        running_maximum = max(running_maximum, candidate)
+        adjusted[original_index] = running_maximum
+    return adjusted.tolist()
+
+
+def _paired_method_comparisons(
+    metrics: pd.DataFrame, sample_count: int, seed: int
+) -> pd.DataFrame:
+    """Compare methods on the same scans using paired bootstrap differences."""
+    rows: list[dict[str, Any]] = []
+    for baseline_index, baseline_method in enumerate(METHOD_NAMES[:-1]):
+        for comparison_method in METHOD_NAMES[baseline_index + 1 :]:
+            baseline = metrics[metrics["method"] == baseline_method].set_index(
+                "identifier"
+            )
+            comparison = metrics[metrics["method"] == comparison_method].set_index(
+                "identifier"
+            )
+            identifiers = sorted(set(baseline.index) & set(comparison.index))
+            if not identifiers:
+                continue
+            for metric in PAIRED_METRICS:
+                baseline_values = baseline.loc[identifiers, metric].to_numpy(dtype=float)
+                comparison_values = comparison.loc[identifiers, metric].to_numpy(
+                    dtype=float
+                )
+                raw_difference = comparison_values - baseline_values
+                improvement = (
+                    raw_difference
+                    if metric in HIGHER_IS_BETTER
+                    else -raw_difference
+                )
+                rng = np.random.default_rng(seed)
+                indices = rng.integers(
+                    0, len(identifiers), size=(sample_count, len(identifiers))
+                )
+                bootstrap_means = improvement[indices].mean(axis=1)
+                if np.allclose(improvement, 0):
+                    p_value = 1.0
+                else:
+                    p_value = float(
+                        stats.wilcoxon(
+                            improvement,
+                            alternative="two-sided",
+                            zero_method="wilcox",
+                        ).pvalue
+                    )
+                tolerance = 1e-12
+                rows.append(
+                    {
+                        "baseline_method": baseline_method,
+                        "comparison_method": comparison_method,
+                        "metric": metric,
+                        "n_paired_scans": len(identifiers),
+                        "baseline_mean": float(baseline_values.mean()),
+                        "comparison_mean": float(comparison_values.mean()),
+                        "raw_comparison_minus_baseline": float(raw_difference.mean()),
+                        "mean_improvement": float(improvement.mean()),
+                        "median_improvement": float(np.median(improvement)),
+                        "improvement_ci_95_lower": float(
+                            np.percentile(bootstrap_means, 2.5)
+                        ),
+                        "improvement_ci_95_upper": float(
+                            np.percentile(bootstrap_means, 97.5)
+                        ),
+                        "comparison_wins": int(np.count_nonzero(improvement > tolerance)),
+                        "baseline_wins": int(np.count_nonzero(improvement < -tolerance)),
+                        "ties": int(np.count_nonzero(np.abs(improvement) <= tolerance)),
+                        "comparison_win_rate": float(
+                            np.count_nonzero(improvement > tolerance) / len(improvement)
+                        ),
+                        "wilcoxon_p_value": p_value,
+                        "bootstrap_samples": sample_count,
+                        "seed": seed,
+                    }
+                )
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result["holm_adjusted_p_value"] = _holm_adjust(
+            result["wilcoxon_p_value"].tolist()
+        )
+    return result
 
 
 def _dataset_source(identifier: str) -> str:
@@ -353,6 +448,12 @@ def run(args: argparse.Namespace) -> None:
     )
     quality_summary = _quality_summary(metrics)
     quality_summary.to_csv(args.output_dir / "quality_summary.csv", index=False)
+    paired_comparisons = _paired_method_comparisons(
+        metrics, bootstrap_samples, args.seed
+    )
+    paired_comparisons.to_csv(
+        args.output_dir / "paired_method_comparisons.csv", index=False
+    )
     if invalid:
         pd.DataFrame(invalid).to_csv(args.output_dir / "invalid_pairs.csv", index=False)
 
