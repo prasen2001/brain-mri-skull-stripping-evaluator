@@ -59,6 +59,10 @@ Dice measures overlap: `2TP / (2TP + FP + FN)`. It ranges from 0 for no overlap 
 
 Intersection over Union is `TP / (TP + FP + FN)`. It divides the shared region by everything covered by either mask. It is stricter numerically than Dice but ranks a fixed set of predictions similarly.
 
+### What are boundary metrics?
+
+Overlap can look similar even when one contour is farther from the reference. Surface Dice asks how much of the two boundaries lies within a tolerance. HD95 is a robust “large boundary error” distance, while ASSD is the average symmetric boundary distance. This project reports HD95 and ASSD in pixels and millimeters using NIfTI header spacing. Lower distance is better; higher surface Dice is better.
+
 ### Why can accuracy be misleading?
 
 If most pixels are background, predicting background everywhere can achieve high pixel accuracy while finding no brain. Dice, sensitivity, and precision focus more directly on the target region and its errors.
@@ -93,7 +97,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 
 ## 60-second explanation
 
-“I built a reproducible evaluation of three classical skull-stripping baselines on the official SynthStrip 2D dataset. Skull stripping is binary segmentation: keeping brain pixels and removing skull and other non-brain anatomy. I started with Otsu thresholding, added morphological cleanup, and then selected a large central connected component. I used the authors' 24-scan validation split to choose morphology parameters and kept all 558 test scans held out. Mean test Dice improved from 0.749 to 0.772 to 0.790. I also added boundary metrics, source-specific analysis, confidence intervals, and prediction-only warning checks. The best method's warnings caught every case below Dice 0.20, but they missed some moderate failures. My takeaway is that spatial cleanup helps and warnings can prioritize review, but neither makes intensity heuristics clinically reliable.”
+“I built a reproducible evaluation of three classical skull-stripping baselines on the official SynthStrip 2D dataset. Skull stripping is binary segmentation: keeping brain pixels and removing skull and other non-brain anatomy. I started with Otsu thresholding, added morphological cleanup, and then selected a large central connected component. I used the authors' 24-scan validation split to choose parameters and kept all 558 test scans held out. Mean test Dice improved from 0.749 to 0.772 to 0.790. A paired scan-level analysis measured the final improvement over raw Otsu as 0.041 Dice, with a 95% interval from 0.035 to 0.047. I also added physical boundary metrics, modality analysis, prediction-only warning checks, and a small public-dataset explorer. The main lesson is that spatial cleanup helps, but the severe qT1 and T2 failures show why these heuristics are not clinically reliable.”
 
 ## Two-minute detailed explanation
 
@@ -101,11 +105,11 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 
 “For preprocessing, I clip each image to its 1st and 99th intensity percentiles and scale to zero-to-one. Method 1 uses Otsu's threshold and scores both intensity polarities without looking at the reference mask. Method 2 adds scale-aware opening, closing, hole filling, and small-object removal. Method 3 scores connected components using area and distance from image center, keeps the best one, and performs final cleanup.
 
-“I implemented TP, TN, FP, FN, Dice, IoU, precision, sensitivity, specificity, surface Dice, HD95, and ASSD directly and unit-tested perfect, partial, no-overlap, boundary, and empty cases. A development-only grid selected morphology parameters. On the held-out 558 scans, mean Dice was 0.749, 0.772, and 0.790. Method 3's 95% bootstrap interval was 0.777 to 0.803. It improved precision and specificity but was slightly less sensitive than Method 2 because selecting one component can discard real brain pixels.
+“I implemented TP, TN, FP, FN, Dice, IoU, precision, sensitivity, specificity, surface Dice, HD95, and ASSD directly and unit-tested perfect, partial, no-overlap, boundary, and empty cases. HD95 and ASSD are available in pixels and physical millimeters from the NIfTI spacing. A development-only grid selected morphology parameters. On the held-out 558 scans, mean Dice was 0.749, 0.772, and 0.790. Method 3's 95% bootstrap interval was 0.777 to 0.803. It improved precision and specificity but was slightly less sensitive than Method 2 because selecting one component can discard real brain pixels.
 
-“I generated per-image CSVs, aggregate and source-specific statistics, confidence intervals, warning summaries, and five-panel best/worst overlays. For the best method, flagged results averaged 0.551 Dice versus 0.804 when unflagged, and all four catastrophic cases below 0.20 were flagged. But the rules missed many moderate failures, so they are triage signals rather than probabilities. I would not claim clinical adequacy. The next experiment would validate these warnings externally before comparing a leakage-safe U-Net against the frozen baselines.”
+“Because the methods process the same scans, I also calculated paired improvements rather than comparing only separate means. Method 3 improved over raw Otsu by 0.041 Dice on average and won on 456 of 558 scans. I generated source- and modality-specific statistics, physical boundary plots, a ranked failure-review report, and warning summaries. For the best method, flagged test results averaged 0.551 Dice versus 0.804 when unflagged, but the rules missed many moderate failures, so they are triage signals rather than probabilities. I would not claim clinical adequacy. The next experiment would validate the frozen pipeline on an external dataset before comparing a leakage-safe U-Net.”
 
-## Eleven likely interview questions
+## Twelve likely interview questions
 
 1. **Why did you choose classical methods?**  
    I am building understanding in layers. Classical methods let me verify data, metrics, and evaluation while explaining every operation. They also create a meaningful baseline for future deep learning.
@@ -129,7 +133,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
    Method 3's Dice standard deviation was 0.156, so performance varied widely. Mean performance alone is not enough; case plots and minimum values reveal risk.
 
 8. **What would you improve first?**  
-   I would establish a training split and compare a small U-Net using the same untouched test set and outputs. I would also evaluate source groups and a second dataset to test generalization.
+   I would first run the frozen pipeline on a second licensed dataset to test external generalization. After that, I would establish a training split and compare a small U-Net while preserving an untouched final test set.
 
 9. **Did you implement the SynthStrip neural model?**  
    No. I used its public 2D evaluation dataset and masks. This version deliberately implements only classical baselines. The original SynthStrip method is deep learning and is cited as the data source.
@@ -138,7 +142,10 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
     I have not demonstrated 3D performance, clinical usefulness, or cross-dataset generalization. I am comfortable explaining the implemented 2D pipeline and its measurements, but I would seek expert guidance on clinical mask definitions and evaluation design.
 
 11. **Are the quality warnings confidence scores?**
-    No. They are deterministic geometry and method-disagreement rules. They caught the most catastrophic failures in this test set, but they are not calibrated probabilities and need external validation.
+    No. They are deterministic geometry and method-disagreement rules. Their thresholds were selected on only 24 development scans, and their observed test behavior is reported honestly. They are not calibrated probabilities and need external validation.
+
+12. **Why did you use a paired analysis?**
+    Every method processed the same 558 scans, so each scan acts as its own control. Subtracting scores scan by scan distinguishes a consistent improvement from a mean difference caused by different case mixes. I report effect size, bootstrap interval, wins/losses/ties, and a corrected paired test rather than only a p-value.
 
 ## Five intelligent questions to ask the interviewer
 
@@ -164,6 +171,8 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - **IoU:** intersection divided by union.
 - **HD95:** robust boundary distance using the 95th percentile; lower is better.
 - **ASSD:** average symmetric distance between predicted and reference boundaries.
+- **Bootstrap interval:** uncertainty estimate produced by repeatedly resampling scans with replacement.
+- **Paired comparison:** comparison of two methods on the same cases.
 - **Morphology:** shape-based binary image processing.
 - **NIfTI:** a common neuroimaging file format (`.nii` or `.nii.gz`).
 - **Normalization:** transforming intensities to a more consistent range.
@@ -193,7 +202,10 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - Activate the environment: `source .venv/bin/activate`.
 - Show the project structure and `configs/default.yaml`.
 - Run `python -m pytest -q` and point out the metric empty-case tests.
+- Optionally run `streamlit run streamlit_app.py` for an interactive public-dataset demonstration.
 - Open `outputs/full_run/method_comparison.png`.
+- Open `docs/assets/paired_dice_improvement.png` and explain why comparisons are paired.
+- Open `docs/assets/modality_dice_comparison.png` and discuss qT1/T2 limitations.
 - Open `docs/assets/quality_warning_rates.png` and explain that warnings are conservative.
 - Open one best and one worst overlay; explain TP, FP, and FN.
 - Show `summary_metrics.csv` and emphasize 558 held-out scans.

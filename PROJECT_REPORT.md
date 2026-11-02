@@ -20,33 +20,41 @@ All images were clipped at their per-image 1st and 99th intensity percentiles an
 
 No ground-truth mask is used during prediction. No method learns from the test set.
 
-The evaluator also records surface Dice at one-pixel tolerance, HD95, and ASSD. Reference-free checks measure predicted area, connected components, centroid location, border contact, and disagreement among methods to flag masks for review.
+The evaluator also records surface Dice at one-pixel tolerance plus HD95 and ASSD in both pixels and physical millimeters read from the NIfTI header. Reference-free checks measure predicted area, connected components, centroid location, border contact, and disagreement among methods to flag masks for review.
 
 ## Experimental design
 
 A grid of 81 parameter combinations was evaluated on only the 24 development scans. The chosen configuration used opening fraction 0.008, closing fraction 0.004, minimum component area fraction 0.005, and centrality weight 0.75. On development data, Method 2 reached mean Dice 0.744 and Method 3 reached 0.750.
 
-The final CLI then evaluated the fixed configuration on 558 held-out test scans using seed 42. Metrics were calculated per image, then summarized across images. Confidence intervals used 1,000 scan-level bootstrap resamples with the same seed. Processing time covers segmentation only. The complete configuration and package versions are in `outputs/full_run/run_config.json`.
+The warning thresholds were separately audited on the same 24 development scans. For a predefined failure threshold of Dice below 0.40, a small grid recommended the existing defaults and identified both development failures with no false warning. This tiny calibration result is not a general accuracy claim.
+
+The final CLI then evaluated the fixed configuration on 558 held-out test scans using seed 42. Metrics were calculated per image, then summarized across images. Confidence intervals and paired method differences used 1,000 scan-level bootstrap resamples with the same seed. Paired Wilcoxon tests used Holm correction across reported comparisons. Processing time covers segmentation only. The complete configuration and package versions are in `outputs/full_run/run_config.json`.
 
 ## Results
 
 | Method | N | Dice mean (median) | IoU mean | Precision | Sensitivity | Specificity | Mean time |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `otsu_threshold` | 558 | 0.749 (0.764) | 0.618 | 0.681 | 0.884 | 0.765 | 0.00032 s |
-| `otsu_morphology` | 558 | 0.772 (0.787) | 0.650 | 0.709 | **0.904** | 0.786 | 0.00218 s |
-| `central_component` | 558 | **0.790 (0.823)** | **0.678** | **0.749** | 0.901 | **0.817** | 0.00380 s |
+| `otsu_threshold` | 558 | 0.749 (0.764) | 0.618 | 0.681 | 0.884 | 0.765 | 0.00034 s |
+| `otsu_morphology` | 558 | 0.772 (0.787) | 0.650 | 0.709 | **0.904** | 0.786 | 0.00225 s |
+| `central_component` | 558 | **0.790 (0.823)** | **0.678** | **0.749** | 0.901 | **0.817** | 0.00397 s |
 
 ![Method comparison](docs/assets/method_comparison.png)
 
 The methods improve progressively in mean Dice, IoU, precision, and specificity. Method 2 has slightly higher mean sensitivity than Method 3 because component selection can discard true disconnected brain pixels. Method 3's extra precision and specificity produce the best overall overlap.
 
-| Method | Mean Dice 95% CI | Surface Dice | HD95 (pixels) | ASSD (pixels) |
+| Method | Mean Dice 95% CI | Surface Dice | HD95 (mm) | ASSD (mm) |
 |---|---:|---:|---:|---:|
-| `otsu_threshold` | 0.737–0.761 | 0.278 | 47.69 | 14.92 |
-| `otsu_morphology` | 0.759–0.783 | 0.307 | 43.49 | 13.15 |
-| `central_component` | **0.777–0.803** | **0.333** | **40.33** | **12.09** |
+| `otsu_threshold` | 0.737–0.761 | 0.278 | 53.09 | 16.36 |
+| `otsu_morphology` | 0.759–0.783 | 0.307 | 46.90 | 14.25 |
+| `central_component` | **0.777–0.803** | **0.333** | **43.88** | **13.26** |
 
 ![Boundary metrics](docs/assets/boundary_metric_comparison.png)
+
+## Paired improvements
+
+Every method processed the same scans, so the analysis subtracts scores scan by scan. Morphology minus Otsu improved Dice by 0.0223 on average (95% bootstrap CI 0.0196–0.0251), winning on 449 scans and losing on 108. Central component minus Otsu improved Dice by 0.0409 (0.0355–0.0468), winning on 456 scans and losing on 101. Central component minus morphology improved Dice by 0.0187 (0.0150–0.0228), with 302 wins, 21 losses, and 235 ties. All Dice comparisons remained significant after Holm correction, but the effect sizes and failures matter more than a small p-value.
+
+![Paired per-scan Dice improvements](docs/assets/paired_dice_improvement.png)
 
 ## Reliability warnings
 
@@ -78,22 +86,24 @@ These failures explain why the later method is not uniformly better. Selecting o
 
 The experiment supports a narrow conclusion: on this 2D test split, deterministic cleanup and component selection improve average overlap over raw Otsu. It does not show that thresholding is clinically adequate. Method 3's standard deviation is 0.156 and its Dice range is 0.085–0.989, so a good average coexists with catastrophic failures.
 
-Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799, Infant 0.714, and FSM 0.700 mean Dice. MRI contrast, resolution, anatomy, and acquisition differences challenge a single intensity rule.
+Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799, Infant 0.714, and FSM 0.700 mean Dice. It also varies by modality encoded in the identifiers: ASL/EPI 0.952, MRA 0.947, DWI 0.912, FLAIR 0.904, T2 0.775, PD 0.757, T1 0.755, and qT1 0.514. MRI contrast, resolution, anatomy, and acquisition differences challenge a single intensity rule.
 
 ![Source-level Dice](docs/assets/source_dice_comparison.png)
+
+![Modality-level Dice](docs/assets/modality_dice_comparison.png)
 
 ## Limitations
 
 - One sagittal slice per scan cannot measure 3D continuity or volumetric accuracy.
 - Only 24 scans informed parameter choice.
 - The heuristic encodes assumptions about intensity, size, connectivity, and location.
-- Warning thresholds are uncalibrated geometry heuristics and miss some poor predictions.
-- Surface distances are in pixels rather than physical millimeters.
+- Warning thresholds were calibrated on only 24 development scans. They remain geometry heuristics rather than confidence probabilities and miss some poor predictions.
+- Millimeter boundary distances depend on NIfTI header spacing and measure only a 2D contour, not a complete 3D surface.
 - Results may not transfer to another scanner, protocol, population, or mask definition.
 - Timing is specific to the local Apple-silicon software environment.
 - This is not a prospective, clinical, diagnostic, or regulatory evaluation.
 
 ## Proposed next experiment
 
-Train a small 2D U-Net using a leakage-safe scan-level training/development split, freeze the current test set, and compare it with these unchanged baselines using the same metrics and case analysis. Add a second external dataset if licensing permits. The key question should be whether learned spatial features reduce the T2 and cross-source failures—not merely whether the model has more parameters.
+First run the frozen classical pipeline on a second licensed dataset to measure external generalization and recalibrate warnings without touching this test set. Then train a small 2D U-Net with a leakage-safe training/development/test design and compare it with these unchanged baselines using the same metrics and paired case analysis. The key question should be whether learned spatial features reduce the qT1/T2 and cross-source failures—not merely whether the model has more parameters.
 
