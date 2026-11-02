@@ -89,6 +89,71 @@ def plot_processing_time(metrics: pd.DataFrame, output_dir: Path) -> None:
     _save_figure(figure, output_dir / "processing_time_comparison.png")
 
 
+def plot_source_dice_comparison(metrics: pd.DataFrame, output_dir: Path) -> None:
+    """Compare Dice across the official dataset source families."""
+    figure, axis = plt.subplots(figsize=(11, 6))
+    sns.barplot(
+        data=metrics,
+        x="dataset_source",
+        y="dice",
+        hue="method",
+        errorbar="sd",
+        ax=axis,
+    )
+    axis.set(
+        title="Dice score by source dataset",
+        xlabel="Source family encoded in scan identifier",
+        ylabel="Dice",
+    )
+    axis.set_ylim(0, 1.08)
+    axis.legend(title="Method", bbox_to_anchor=(1.02, 1), loc="upper left")
+    axis.grid(axis="y", alpha=0.25)
+    _save_figure(figure, output_dir / "source_dice_comparison.png")
+
+
+def plot_quality_warning_rates(metrics: pd.DataFrame, output_dir: Path) -> None:
+    """Show the fraction of predictions flagged by reference-free checks."""
+    rates = (
+        metrics.groupby("method", sort=False)["has_quality_warning"]
+        .mean()
+        .mul(100)
+        .reset_index(name="warning_rate_percent")
+    )
+    figure, axis = plt.subplots(figsize=(9, 6))
+    sns.barplot(data=rates, x="method", y="warning_rate_percent", ax=axis)
+    for container in axis.containers:
+        axis.bar_label(container, fmt="%.1f%%", padding=3)
+    axis.set(
+        title="Predictions flagged for manual review",
+        xlabel="Method",
+        ylabel="Flagged predictions (%)",
+    )
+    axis.set_ylim(0, max(100, float(rates["warning_rate_percent"].max()) * 1.15))
+    axis.tick_params(axis="x", rotation=12)
+    axis.grid(axis="y", alpha=0.25)
+    _save_figure(figure, output_dir / "quality_warning_rates.png")
+
+
+def plot_boundary_metric_comparison(metrics: pd.DataFrame, output_dir: Path) -> None:
+    """Compare boundary agreement and pixel-distance errors."""
+    figure, axes = plt.subplots(1, 3, figsize=(16, 5))
+    specifications = (
+        ("surface_dice", "Surface Dice (1-pixel tolerance)", "Higher is better"),
+        ("hd95_pixels", "HD95 (pixels)", "Lower is better"),
+        ("assd_pixels", "ASSD (pixels)", "Lower is better"),
+    )
+    for axis, (column, title, direction) in zip(axes, specifications, strict=True):
+        sns.barplot(data=metrics, x="method", y=column, errorbar="sd", ax=axis)
+        axis.set(title=f"{title}\n{direction}", xlabel="Method", ylabel=title)
+        axis.tick_params(axis="x", rotation=18)
+        axis.grid(axis="y", alpha=0.25)
+        if column == "surface_dice":
+            axis.set_ylim(0, 1.08)
+    figure.suptitle("Boundary-quality comparison", fontsize=15)
+    figure.tight_layout()
+    _save_figure(figure, output_dir / "boundary_metric_comparison.png")
+
+
 def _error_categories(prediction: np.ndarray, reference: np.ndarray) -> np.ndarray:
     categories = np.zeros(prediction.shape, dtype=np.uint8)
     categories[prediction & reference] = 1
@@ -214,6 +279,9 @@ def create_all_visualizations(
     plot_metric_distribution(metrics, "dice", output_dir)
     plot_metric_distribution(metrics, "iou", output_dir)
     plot_processing_time(metrics, output_dir)
+    plot_source_dice_comparison(metrics, output_dir)
+    plot_quality_warning_rates(metrics, output_dir)
+    plot_boundary_metric_comparison(metrics, output_dir)
     return create_case_visualizations(
         metrics,
         pairs,
