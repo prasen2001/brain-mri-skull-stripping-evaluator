@@ -321,6 +321,116 @@ def create_case_visualizations(
     return best_method
 
 
+def create_failure_review(
+    metrics: pd.DataFrame,
+    pairs: dict[str, ImageMaskPair],
+    output_dir: Path,
+    config: MorphologyConfig,
+    lower_percentile: float,
+    upper_percentile: float,
+    maximum_cases: int = 10,
+) -> Path:
+    """Create a ranked Markdown review with multi-method diagnostic figures."""
+    central = metrics[metrics["method"] == "central_component"].copy()
+    flagged = central[central["has_quality_warning"].astype(bool)].copy()
+    flagged["review_priority"] = (
+        flagged["quality_warning_count"] + flagged["method_disagreement"]
+    )
+    selection = flagged.sort_values(
+        ["review_priority", "method_disagreement", "identifier"],
+        ascending=[False, False, True],
+    ).head(maximum_cases)
+    review_dir = output_dir / "failure_review_cases"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    markdown = [
+        "# Ranked failure-review report",
+        "",
+        "Cases are ranked using prediction-only warning count and method disagreement. "
+        "Ground-truth metrics are shown afterward for retrospective audit and do not "
+        "influence the warning rules.",
+        "",
+        "| Rank | Identifier | Warnings | Disagreement | Area | Dice | Surface Dice | HD95 (mm) |",
+        "|---:|---|---|---:|---:|---:|---:|---:|",
+    ]
+    normalize = lambda image: robust_normalize(  # noqa: E731
+        image, lower_percentile, upper_percentile
+    )
+    for rank, (_, row) in enumerate(selection.iterrows(), start=1):
+        identifier = str(row["identifier"])
+        pair = pairs[identifier]
+        image, reference = load_pair(pair)
+        normalized = normalize(image)
+        predictions = {
+            method: segment(normalized, method, config)[0]
+            for method in ("otsu_threshold", "otsu_morphology", "central_component")
+        }
+        central_prediction = predictions["central_component"]
+        figure, axes = plt.subplots(2, 4, figsize=(16, 8))
+        axes[0, 0].imshow(normalized, cmap="gray", vmin=0, vmax=1)
+        axes[0, 0].set_title("Normalized MRI")
+        axes[0, 1].imshow(reference, cmap="gray", vmin=0, vmax=1)
+        axes[0, 1].set_title("Ground-truth mask")
+        axes[0, 2].imshow(normalized, cmap="gray", vmin=0, vmax=1)
+        if reference.any():
+            axes[0, 2].contour(reference, levels=[0.5], colors=["cyan"], linewidths=1)
+        if central_prediction.any():
+            axes[0, 2].contour(
+                central_prediction, levels=[0.5], colors=["magenta"], linewidths=1
+            )
+        axes[0, 2].set_title("Central overlay: GT=cyan, prediction=magenta")
+        axes[0, 3].imshow(
+            _error_categories(central_prediction, reference),
+            cmap=ListedColormap(["#252525", "#2ca25f", "#f28e2b", "#6a51a3"]),
+            vmin=0,
+            vmax=3,
+        )
+        axes[0, 3].set_title("Central error map: TP green, FP orange, FN purple")
+
+        for axis, method in zip(
+            axes[1, :3],
+            ("otsu_threshold", "otsu_morphology", "central_component"),
+            strict=True,
+        ):
+            method_row = metrics[
+                (metrics["identifier"] == identifier) & (metrics["method"] == method)
+            ].iloc[0]
+            axis.imshow(predictions[method], cmap="gray", vmin=0, vmax=1)
+            axis.set_title(f"{method}\nDice={method_row['dice']:.3f}")
+        axes[1, 3].axis("off")
+        axes[1, 3].text(
+            0,
+            1,
+            "\n".join(
+                (
+                    f"Warnings: {row['quality_warnings']}",
+                    f"Disagreement: {row['method_disagreement']:.3f}",
+                    f"Predicted area: {row['predicted_area_fraction']:.3f}",
+                    f"Components: {int(row['component_count'])}",
+                    f"Surface Dice: {row['surface_dice']:.3f}",
+                    f"HD95: {row['hd95_mm']:.2f} mm",
+                )
+            ),
+            va="top",
+            fontsize=11,
+        )
+        for axis in axes.ravel()[:7]:
+            axis.axis("off")
+        figure.suptitle(f"Review rank {rank}: {identifier}", fontsize=15)
+        figure.tight_layout(rect=(0, 0, 1, 0.96))
+        filename = f"{rank:02d}_{identifier}.png"
+        _save_figure(figure, review_dir / filename)
+        markdown.append(
+            f"| {rank} | `{identifier}` | {row['quality_warnings']} | "
+            f"{row['method_disagreement']:.3f} | {row['predicted_area_fraction']:.3f} | "
+            f"{row['dice']:.3f} | {row['surface_dice']:.3f} | {row['hd95_mm']:.2f} |"
+        )
+        markdown.extend(("", f"![Review case {rank}](failure_review_cases/{filename})", ""))
+
+    report_path = output_dir / "failure_review.md"
+    report_path.write_text("\n".join(markdown), encoding="utf-8")
+    return report_path
+
+
 def create_all_visualizations(
     metrics: pd.DataFrame,
     pairs: dict[str, ImageMaskPair],
@@ -340,7 +450,7 @@ def create_all_visualizations(
     plot_paired_dice_improvements(metrics, output_dir)
     plot_quality_warning_rates(metrics, output_dir)
     plot_boundary_metric_comparison(metrics, output_dir)
-    return create_case_visualizations(
+    best_method = create_case_visualizations(
         metrics,
         pairs,
         output_dir,
@@ -348,4 +458,13 @@ def create_all_visualizations(
         lower_percentile,
         upper_percentile,
     )
+    create_failure_review(
+        metrics,
+        pairs,
+        output_dir,
+        config,
+        lower_percentile,
+        upper_percentile,
+    )
+    return best_method
 
