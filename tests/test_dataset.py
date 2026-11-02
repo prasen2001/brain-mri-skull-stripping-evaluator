@@ -4,7 +4,7 @@ import nibabel as nib
 import numpy as np
 import pytest
 
-from src.dataset import discover_pairs, load_pair, validate_pairs
+from src.dataset import discover_pairs, load_pair, load_pair_with_spacing, validate_pairs
 
 
 def _save_nifti(path: Path, array: np.ndarray) -> None:
@@ -60,4 +60,17 @@ def test_load_pair_binarizes_mask(tmp_path: Path) -> None:
     assert loaded_image.shape == (3, 4)
     assert loaded_mask.dtype == np.bool_
     assert int(loaded_mask.sum()) == 6
+
+
+def test_load_pair_reports_pixel_spacing(tmp_path: Path) -> None:
+    image = nib.Nifti1Image(np.ones((3, 4, 1), dtype=np.float32), np.eye(4))
+    image.header.set_zooms((2.0, 0.5, 3.0))
+    mask = nib.Nifti1Image(np.ones((3, 4, 1), dtype=np.uint8), np.eye(4))
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    nib.save(image, scan / "image.nii.gz")
+    nib.save(mask, scan / "mask.nii.gz")
+    pairs, _ = discover_pairs(tmp_path, "all")
+    _, _, spacing = load_pair_with_spacing(pairs[0])
+    assert spacing == (2.0, 0.5)
 

@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.dataset import discover_pairs, load_pair, validate_pairs
+from src.dataset import discover_pairs, load_pair_with_spacing, validate_pairs
 from src.metrics import compute_binary_metrics, compute_boundary_metrics
 from src.preprocessing import robust_normalize
 from src.quality import QualityConfig, mean_method_disagreement, prediction_diagnostics
@@ -163,6 +163,8 @@ SUMMARY_METRICS = [
     "surface_dice",
     "hd95_pixels",
     "assd_pixels",
+    "hd95_mm",
+    "assd_mm",
 ]
 
 
@@ -287,7 +289,7 @@ def run(args: argparse.Namespace) -> None:
     evaluated_pairs = []
     for index, pair in enumerate(valid_pairs, start=1):
         try:
-            image, reference = load_pair(pair)
+            image, reference, spacing_mm = load_pair_with_spacing(pair)
             normalized = robust_normalize(image, lower, upper)
             predictions: dict[str, np.ndarray] = {}
             thresholds: dict[str, float] = {}
@@ -303,7 +305,7 @@ def run(args: argparse.Namespace) -> None:
                 prediction = predictions[method]
                 metric_values = compute_binary_metrics(prediction, reference)
                 boundary_values = compute_boundary_metrics(
-                    prediction, reference, boundary_tolerance
+                    prediction, reference, boundary_tolerance, spacing_mm
                 )
                 disagreement = mean_method_disagreement(
                     prediction,
@@ -320,6 +322,8 @@ def run(args: argparse.Namespace) -> None:
                         "method": method,
                         "image_height": int(image.shape[0]),
                         "image_width": int(image.shape[1]),
+                        "row_spacing_mm": spacing_mm[0],
+                        "column_spacing_mm": spacing_mm[1],
                         "otsu_threshold": thresholds[method],
                         **metric_values,
                         **boundary_values,

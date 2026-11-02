@@ -74,7 +74,13 @@ def test_boundary_metrics_for_identical_masks() -> None:
     mask = np.zeros((8, 8), dtype=bool)
     mask[2:6, 2:6] = True
     result = compute_boundary_metrics(mask, mask)
-    assert result == {"surface_dice": 1.0, "hd95_pixels": 0.0, "assd_pixels": 0.0}
+    assert result == {
+        "surface_dice": 1.0,
+        "hd95_pixels": 0.0,
+        "assd_pixels": 0.0,
+        "hd95_mm": 0.0,
+        "assd_mm": 0.0,
+    }
 
 
 def test_boundary_metrics_for_shifted_masks() -> None:
@@ -86,6 +92,20 @@ def test_boundary_metrics_for_shifted_masks() -> None:
     assert 0 < result["surface_dice"] < 1
     assert result["hd95_pixels"] > 0
     assert result["assd_pixels"] > 0
+
+
+def test_boundary_metrics_respect_anisotropic_spacing() -> None:
+    prediction = np.zeros((10, 10), dtype=bool)
+    reference = np.zeros((10, 10), dtype=bool)
+    prediction[4, 4] = True
+    reference[5, 4] = True
+    result = compute_boundary_metrics(
+        prediction, reference, tolerance_pixels=0, spacing_mm=(2.5, 0.5)
+    )
+    assert result["hd95_pixels"] == 1.0
+    assert result["assd_pixels"] == 1.0
+    assert result["hd95_mm"] == 2.5
+    assert result["assd_mm"] == 2.5
 
 
 def test_boundary_metrics_for_empty_masks() -> None:

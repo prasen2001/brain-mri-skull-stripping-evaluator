@@ -139,8 +139,8 @@ def plot_boundary_metric_comparison(metrics: pd.DataFrame, output_dir: Path) -> 
     figure, axes = plt.subplots(1, 3, figsize=(16, 5))
     specifications = (
         ("surface_dice", "Surface Dice (1-pixel tolerance)", "Higher is better"),
-        ("hd95_pixels", "HD95 (pixels)", "Lower is better"),
-        ("assd_pixels", "ASSD (pixels)", "Lower is better"),
+        ("hd95_mm", "HD95 (mm)", "Lower is better"),
+        ("assd_mm", "ASSD (mm)", "Lower is better"),
     )
     for axis, (column, title, direction) in zip(axes, specifications, strict=True):
         sns.barplot(data=metrics, x="method", y=column, errorbar="sd", ax=axis)

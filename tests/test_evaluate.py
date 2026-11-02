@@ -28,6 +28,8 @@ def _metrics_frame() -> pd.DataFrame:
                     "surface_dice": score,
                     "hd95_pixels": 2.0 - score,
                     "assd_pixels": 1.0 - score,
+                    "hd95_mm": 2.0 - score,
+                    "assd_mm": 1.0 - score,
                     "processing_time_seconds": 0.01,
                     "has_quality_warning": index == 0,
                     "quality_warning_count": int(index == 0),

@@ -121,10 +121,18 @@ def _as_2d(array: np.ndarray, label: str, identifier: str) -> np.ndarray:
 
 def load_pair(pair: ImageMaskPair) -> tuple[np.ndarray, np.ndarray]:
     """Load one NIfTI pair, binarize its mask, and validate spatial shape."""
+    image, mask, _ = load_pair_with_spacing(pair)
+    return image, mask
+
+
+def load_pair_with_spacing(
+    pair: ImageMaskPair,
+) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
+    """Load a validated pair and return row/column pixel spacing in millimeters."""
     try:
-        image = _as_2d(
-            np.asanyarray(nib.load(pair.image_path).dataobj), "image", pair.identifier
-        )
+        image_nifti = nib.load(pair.image_path)
+        image_raw = np.asanyarray(image_nifti.dataobj)
+        image = _as_2d(image_raw, "image", pair.identifier)
         mask = _as_2d(
             np.asanyarray(nib.load(pair.mask_path).dataobj), "mask", pair.identifier
         )
@@ -140,7 +148,19 @@ def load_pair(pair: ImageMaskPair) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"{pair.identifier}: image is empty.")
     if not np.isfinite(image).any():
         raise ValueError(f"{pair.identifier}: image contains no finite values.")
-    return np.asarray(image, dtype=np.float32), np.asarray(mask > 0, dtype=bool)
+
+    retained_axes = [axis for axis, size in enumerate(image_raw.shape) if size != 1]
+    zooms = image_nifti.header.get_zooms()
+    if len(retained_axes) != 2 or any(axis >= len(zooms) for axis in retained_axes):
+        raise ValueError(f"{pair.identifier}: could not determine 2D pixel spacing.")
+    spacing = tuple(float(zooms[axis]) for axis in retained_axes)
+    if any(not np.isfinite(value) or value <= 0 for value in spacing):
+        raise ValueError(f"{pair.identifier}: invalid pixel spacing {spacing}.")
+    return (
+        np.asarray(image, dtype=np.float32),
+        np.asarray(mask > 0, dtype=bool),
+        (spacing[0], spacing[1]),
+    )
 
 
 def validate_pairs(
