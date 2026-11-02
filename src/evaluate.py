@@ -349,6 +349,24 @@ def _dataset_source(identifier: str) -> str:
     return identifier.split("_", maxsplit=1)[0].upper()
 
 
+def _modality(identifier: str) -> str:
+    """Map the modality token in official identifiers to a display label."""
+    tokens = identifier.lower().split("_")
+    if len(tokens) < 2:
+        return "UNKNOWN"
+    labels = {
+        "t1": "T1",
+        "t2": "T2",
+        "pd": "PD",
+        "mra": "MRA",
+        "dwi": "DWI",
+        "epi": "ASL/EPI",
+        "flair": "FLAIR",
+        "qt1": "qT1",
+    }
+    return labels.get(tokens[1], tokens[1].upper())
+
+
 def run(args: argparse.Namespace) -> None:
     """Validate inputs, evaluate methods, save tables, and render figures."""
     if args.limit is not None and args.limit <= 0:
@@ -413,6 +431,7 @@ def run(args: argparse.Namespace) -> None:
                     {
                         "identifier": pair.identifier,
                         "dataset_source": _dataset_source(pair.identifier),
+                        "modality": _modality(pair.identifier),
                         "subset": pair.subset,
                         "method": method,
                         "image_height": int(image.shape[0]),
@@ -440,6 +459,10 @@ def run(args: argparse.Namespace) -> None:
     summary.to_csv(args.output_dir / "summary_metrics.csv", index=False)
     source_summary = _summarize_grouped(metrics, ["dataset_source", "method"])
     source_summary.to_csv(args.output_dir / "source_summary_metrics.csv", index=False)
+    modality_summary = _summarize_grouped(metrics, ["modality", "method"])
+    modality_summary.to_csv(
+        args.output_dir / "modality_summary_metrics.csv", index=False
+    )
     confidence_intervals = _bootstrap_confidence_intervals(
         metrics, bootstrap_samples, args.seed
     )

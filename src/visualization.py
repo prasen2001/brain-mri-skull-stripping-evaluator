@@ -111,6 +111,62 @@ def plot_source_dice_comparison(metrics: pd.DataFrame, output_dir: Path) -> None
     _save_figure(figure, output_dir / "source_dice_comparison.png")
 
 
+def plot_modality_dice_comparison(metrics: pd.DataFrame, output_dir: Path) -> None:
+    """Compare Dice across modality tokens encoded in official identifiers."""
+    order = sorted(metrics["modality"].unique())
+    figure, axis = plt.subplots(figsize=(13, 6))
+    sns.barplot(
+        data=metrics,
+        x="modality",
+        y="dice",
+        hue="method",
+        order=order,
+        errorbar="sd",
+        ax=axis,
+    )
+    axis.set(
+        title="Dice score by image modality",
+        xlabel="Modality encoded in scan identifier",
+        ylabel="Dice",
+    )
+    axis.set_ylim(0, 1.08)
+    axis.legend(title="Method", bbox_to_anchor=(1.02, 1), loc="upper left")
+    axis.grid(axis="y", alpha=0.25)
+    _save_figure(figure, output_dir / "modality_dice_comparison.png")
+
+
+def plot_paired_dice_improvements(metrics: pd.DataFrame, output_dir: Path) -> None:
+    """Show per-scan Dice changes between progressive baseline stages."""
+    pivot = metrics.pivot(index="identifier", columns="method", values="dice")
+    changes = pd.DataFrame(
+        {
+            "Morphology minus Otsu": pivot["otsu_morphology"]
+            - pivot["otsu_threshold"],
+            "Central component minus morphology": pivot["central_component"]
+            - pivot["otsu_morphology"],
+        }
+    ).melt(var_name="comparison", value_name="dice_change")
+    figure, axis = plt.subplots(figsize=(10, 6))
+    sns.violinplot(
+        data=changes,
+        x="comparison",
+        y="dice_change",
+        inner="box",
+        cut=0,
+        ax=axis,
+    )
+    axis.axhline(0, color="black", linestyle="--", linewidth=1, label="No change")
+    axis.set(
+        title="Paired per-scan Dice improvements",
+        xlabel="Progressive method comparison",
+        ylabel="Dice change (positive favors later method)",
+    )
+    axis.tick_params(axis="x", rotation=8)
+    axis.grid(axis="y", alpha=0.25)
+    axis.legend(loc="lower right")
+    _save_figure(figure, output_dir / "paired_dice_improvement.png")
+
+
 def plot_quality_warning_rates(metrics: pd.DataFrame, output_dir: Path) -> None:
     """Show the fraction of predictions flagged by reference-free checks."""
     rates = (
@@ -280,6 +336,8 @@ def create_all_visualizations(
     plot_metric_distribution(metrics, "iou", output_dir)
     plot_processing_time(metrics, output_dir)
     plot_source_dice_comparison(metrics, output_dir)
+    plot_modality_dice_comparison(metrics, output_dir)
+    plot_paired_dice_improvements(metrics, output_dir)
     plot_quality_warning_rates(metrics, output_dir)
     plot_boundary_metric_comparison(metrics, output_dir)
     return create_case_visualizations(

@@ -4,6 +4,7 @@ import pytest
 from src.evaluate import (
     _bootstrap_confidence_intervals,
     _dataset_source,
+    _modality,
     _paired_method_comparisons,
     _quality_summary,
     _summarize_grouped,
@@ -43,6 +44,13 @@ def _metrics_frame() -> pd.DataFrame:
 def test_dataset_source_uses_identifier_prefix() -> None:
     assert _dataset_source("ixi_t1_001") == "IXI"
     assert _dataset_source("infant_t1_01") == "INFANT"
+
+
+def test_modality_uses_official_identifier_token() -> None:
+    assert _modality("ixi_t2_001") == "T2"
+    assert _modality("qin_flair_01") == "FLAIR"
+    assert _modality("asl_epi_101") == "ASL/EPI"
+    assert _modality("fsm_qt1_02cd") == "qT1"
 
 
 def test_source_summary_preserves_groups() -> None:
