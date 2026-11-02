@@ -24,6 +24,9 @@ class QualityConfig:
     maximum_method_disagreement: float = 0.35
 
 
+DEFAULT_QUALITY_CONFIG = QualityConfig()
+
+
 def mask_iou(first: np.ndarray, second: np.ndarray) -> float:
     """Calculate mask IoU, treating two empty masks as agreement."""
     if first.shape != second.shape:
@@ -48,7 +51,7 @@ def mean_method_disagreement(
 def prediction_diagnostics(
     prediction: np.ndarray,
     method_disagreement: float,
-    config: QualityConfig = QualityConfig(),
+    config: QualityConfig = DEFAULT_QUALITY_CONFIG,
 ) -> dict[str, DiagnosticValue]:
     """Measure mask geometry and produce deterministic warning labels.
 

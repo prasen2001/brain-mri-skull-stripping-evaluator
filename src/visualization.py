@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import matplotlib
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
-from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.colors import ListedColormap
+from matplotlib.container import BarContainer
+from matplotlib.patches import Patch
 
 from src.dataset import ImageMaskPair, load_pair
 from src.preprocessing import robust_normalize
@@ -178,7 +179,8 @@ def plot_quality_warning_rates(metrics: pd.DataFrame, output_dir: Path) -> None:
     figure, axis = plt.subplots(figsize=(9, 6))
     sns.barplot(data=rates, x="method", y="warning_rate_percent", ax=axis)
     for container in axis.containers:
-        axis.bar_label(container, fmt="%.1f%%", padding=3)
+        if isinstance(container, BarContainer):
+            axis.bar_label(container, fmt="%.1f%%", padding=3)
     axis.set(
         title="Predictions flagged for manual review",
         xlabel="Method",

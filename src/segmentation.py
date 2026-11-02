@@ -24,6 +24,9 @@ class MorphologyConfig:
     centrality_weight: float = 0.75
 
 
+DEFAULT_MORPHOLOGY_CONFIG = MorphologyConfig()
+
+
 def _radius(shape: tuple[int, int], fraction: float) -> int:
     return max(1, int(round(min(shape) * fraction)))
 
@@ -69,7 +72,7 @@ def otsu_threshold(image: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 def clean_with_morphology(
-    mask: np.ndarray, config: MorphologyConfig = MorphologyConfig()
+    mask: np.ndarray, config: MorphologyConfig = DEFAULT_MORPHOLOGY_CONFIG
 ) -> np.ndarray:
     """Open, close, fill holes, and remove small connected regions."""
     binary = np.asarray(mask, dtype=bool)
@@ -85,7 +88,7 @@ def clean_with_morphology(
 
 
 def otsu_morphology(
-    image: np.ndarray, config: MorphologyConfig = MorphologyConfig()
+    image: np.ndarray, config: MorphologyConfig = DEFAULT_MORPHOLOGY_CONFIG
 ) -> tuple[np.ndarray, float]:
     """Run Otsu then configurable scale-aware morphological cleanup."""
     initial, threshold = otsu_threshold(image)
@@ -122,7 +125,7 @@ def select_largest_central_component(
 
 
 def central_component(
-    image: np.ndarray, config: MorphologyConfig = MorphologyConfig()
+    image: np.ndarray, config: MorphologyConfig = DEFAULT_MORPHOLOGY_CONFIG
 ) -> tuple[np.ndarray, float]:
     """Run Method 2, select the largest central component, and clean it."""
     cleaned, threshold = otsu_morphology(image, config)

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import importlib.metadata
 import json
-from pathlib import Path
 import platform
 import random
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 import yaml
+from scipy import stats
 
 from src.dataset import discover_pairs, load_pair_with_spacing, validate_pairs
 from src.metrics import compute_binary_metrics, compute_boundary_metrics
@@ -485,7 +485,7 @@ def run(args: argparse.Namespace) -> None:
         metrics, pair_map, args.output_dir, config, lower, upper
     )
     run_config = {
-        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "created_utc": datetime.now(UTC).isoformat(),
         "data_dir": str(args.data_dir),
         "output_dir": str(args.output_dir),
         "requested_subset": args.subset,

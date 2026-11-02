@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import cast
 
 import nibabel as nib
 import numpy as np
@@ -130,12 +131,11 @@ def load_pair_with_spacing(
 ) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
     """Load a validated pair and return row/column pixel spacing in millimeters."""
     try:
-        image_nifti = nib.load(pair.image_path)
+        image_nifti = cast(nib.Nifti1Image, nib.load(pair.image_path))
         image_raw = np.asanyarray(image_nifti.dataobj)
         image = _as_2d(image_raw, "image", pair.identifier)
-        mask = _as_2d(
-            np.asanyarray(nib.load(pair.mask_path).dataobj), "mask", pair.identifier
-        )
+        mask_nifti = cast(nib.Nifti1Image, nib.load(pair.mask_path))
+        mask = _as_2d(np.asanyarray(mask_nifti.dataobj), "mask", pair.identifier)
     except (OSError, ValueError) as exc:
         raise ValueError(f"{pair.identifier}: could not load NIfTI pair: {exc}") from exc
 

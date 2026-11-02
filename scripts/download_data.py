@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from pathlib import Path
 import tarfile
-from typing import Iterator
+from collections.abc import Iterator
+from pathlib import Path
 from urllib.request import urlopen
 
 URL = "https://surfer.nmr.mgh.harvard.edu/docs/synthstrip/data/synthstrip_data_v1.5_2d.tar"
