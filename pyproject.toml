@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
+app = ["streamlit>=1.40,<2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
