@@ -93,7 +93,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 
 ## 60-second explanation
 
-“I built a reproducible evaluation of three classical skull-stripping baselines on the official SynthStrip 2D dataset. Skull stripping is binary segmentation: keeping brain pixels and removing skull and other non-brain anatomy. I started with Otsu thresholding, added morphological cleanup, and then selected a large central connected component. I used the authors' 24-scan validation split to choose morphology parameters and kept all 558 test scans held out. Mean test Dice improved from 0.749 to 0.772 to 0.790. The connected-component method was best on average, but its worst Dice was 0.085 on a T2 image because it selected a bright internal structure. My main takeaway is that simple spatial cleanup helps, but intensity-only heuristics are not reliable enough for clinical use. The project gives me a correct baseline and failure analysis for a future U-Net.”
+“I built a reproducible evaluation of three classical skull-stripping baselines on the official SynthStrip 2D dataset. Skull stripping is binary segmentation: keeping brain pixels and removing skull and other non-brain anatomy. I started with Otsu thresholding, added morphological cleanup, and then selected a large central connected component. I used the authors' 24-scan validation split to choose morphology parameters and kept all 558 test scans held out. Mean test Dice improved from 0.749 to 0.772 to 0.790. I also added boundary metrics, source-specific analysis, confidence intervals, and prediction-only warning checks. The best method's warnings caught every case below Dice 0.20, but they missed some moderate failures. My takeaway is that spatial cleanup helps and warnings can prioritize review, but neither makes intensity heuristics clinically reliable.”
 
 ## Two-minute detailed explanation
 
@@ -101,11 +101,11 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 
 “For preprocessing, I clip each image to its 1st and 99th intensity percentiles and scale to zero-to-one. Method 1 uses Otsu's threshold and scores both intensity polarities without looking at the reference mask. Method 2 adds scale-aware opening, closing, hole filling, and small-object removal. Method 3 scores connected components using area and distance from image center, keeps the best one, and performs final cleanup.
 
-“I implemented TP, TN, FP, FN, Dice, IoU, precision, sensitivity, and specificity directly and unit-tested perfect, partial, no-overlap, and empty cases. A development-only grid selected morphology parameters. On the held-out 558 scans, mean Dice was 0.749, 0.772, and 0.790. Method 3 improved precision and specificity but was slightly less sensitive than Method 2 because selecting one component can discard real brain pixels.
+“I implemented TP, TN, FP, FN, Dice, IoU, precision, sensitivity, specificity, surface Dice, HD95, and ASSD directly and unit-tested perfect, partial, no-overlap, boundary, and empty cases. A development-only grid selected morphology parameters. On the held-out 558 scans, mean Dice was 0.749, 0.772, and 0.790. Method 3's 95% bootstrap interval was 0.777 to 0.803. It improved precision and specificity but was slightly less sensitive than Method 2 because selecting one component can discard real brain pixels.
 
-“I generated per-image CSVs, aggregate statistics, distributions, timing charts, and five-panel best/worst overlays. The most useful result was the failure analysis: several T2 scans broke the intensity assumption, with the method selecting the corpus callosum, another bright internal region, or a skull rim. So I would not claim clinical adequacy. The next experiment would compare a leakage-safe U-Net against these frozen baselines, ideally with an external dataset.”
+“I generated per-image CSVs, aggregate and source-specific statistics, confidence intervals, warning summaries, and five-panel best/worst overlays. For the best method, flagged results averaged 0.551 Dice versus 0.804 when unflagged, and all four catastrophic cases below 0.20 were flagged. But the rules missed many moderate failures, so they are triage signals rather than probabilities. I would not claim clinical adequacy. The next experiment would validate these warnings externally before comparing a leakage-safe U-Net against the frozen baselines.”
 
-## Ten likely interview questions
+## Eleven likely interview questions
 
 1. **Why did you choose classical methods?**  
    I am building understanding in layers. Classical methods let me verify data, metrics, and evaluation while explaining every operation. They also create a meaningful baseline for future deep learning.
@@ -137,6 +137,9 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 10. **What do you still not know?**  
     I have not demonstrated 3D performance, clinical usefulness, or cross-dataset generalization. I am comfortable explaining the implemented 2D pipeline and its measurements, but I would seek expert guidance on clinical mask definitions and evaluation design.
 
+11. **Are the quality warnings confidence scores?**
+    No. They are deterministic geometry and method-disagreement rules. They caught the most catastrophic failures in this test set, but they are not calibrated probabilities and need external validation.
+
 ## Five intelligent questions to ask the interviewer
 
 1. In your work, which skull-stripping failure modes most strongly affect downstream analysis?
@@ -159,6 +162,8 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - **False positive:** non-brain that the method kept.
 - **Ground truth:** reference annotation used for evaluation.
 - **IoU:** intersection divided by union.
+- **HD95:** robust boundary distance using the 95th percentile; lower is better.
+- **ASSD:** average symmetric distance between predicted and reference boundaries.
 - **Morphology:** shape-based binary image processing.
 - **NIfTI:** a common neuroimaging file format (`.nii` or `.nii.gz`).
 - **Normalization:** transforming intensities to a more consistent range.
@@ -168,6 +173,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - **Segmentation:** assigning a class to each pixel or voxel.
 - **Sensitivity:** fraction of actual brain that is detected.
 - **Specificity:** fraction of non-brain correctly rejected.
+- **Surface Dice:** fraction of boundary pixels matching within a chosen tolerance.
 - **U-Net:** an encoder-decoder neural network architecture for image segmentation.
 - **Voxel:** one volume element in a 3D image.
 
@@ -180,6 +186,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - Do not generalize the result to unseen scanners, diseases, populations, 3D volumes, or datasets.
 - Do not claim deep-learning expertise from this classical project.
 - Do not hide the T2 failures or quote only the best cases.
+- Do not call warning flags calibrated confidence or proof that an unflagged mask is correct.
 
 ## Demonstration checklist
 
@@ -187,6 +194,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - Show the project structure and `configs/default.yaml`.
 - Run `python -m pytest -q` and point out the metric empty-case tests.
 - Open `outputs/full_run/method_comparison.png`.
+- Open `docs/assets/quality_warning_rates.png` and explain that warnings are conservative.
 - Open one best and one worst overlay; explain TP, FP, and FN.
 - Show `summary_metrics.csv` and emphasize 558 held-out scans.
 - Explain development tuning versus final testing.

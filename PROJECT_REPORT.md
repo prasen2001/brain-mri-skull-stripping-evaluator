@@ -20,23 +20,39 @@ All images were clipped at their per-image 1st and 99th intensity percentiles an
 
 No ground-truth mask is used during prediction. No method learns from the test set.
 
+The evaluator also records surface Dice at one-pixel tolerance, HD95, and ASSD. Reference-free checks measure predicted area, connected components, centroid location, border contact, and disagreement among methods to flag masks for review.
+
 ## Experimental design
 
 A grid of 81 parameter combinations was evaluated on only the 24 development scans. The chosen configuration used opening fraction 0.008, closing fraction 0.004, minimum component area fraction 0.005, and centrality weight 0.75. On development data, Method 2 reached mean Dice 0.744 and Method 3 reached 0.750.
 
-The final CLI then evaluated the fixed configuration on 558 held-out test scans using seed 42. Metrics were calculated per image, then summarized across images. Processing time covers segmentation only. The complete configuration and package versions are in `outputs/full_run/run_config.json`.
+The final CLI then evaluated the fixed configuration on 558 held-out test scans using seed 42. Metrics were calculated per image, then summarized across images. Confidence intervals used 1,000 scan-level bootstrap resamples with the same seed. Processing time covers segmentation only. The complete configuration and package versions are in `outputs/full_run/run_config.json`.
 
 ## Results
 
 | Method | N | Dice mean (median) | IoU mean | Precision | Sensitivity | Specificity | Mean time |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `otsu_threshold` | 558 | 0.749 (0.764) | 0.618 | 0.681 | 0.884 | 0.765 | 0.00031 s |
-| `otsu_morphology` | 558 | 0.772 (0.787) | 0.650 | 0.709 | **0.904** | 0.786 | 0.00219 s |
-| `central_component` | 558 | **0.790 (0.823)** | **0.678** | **0.749** | 0.901 | **0.817** | 0.00379 s |
+| `otsu_threshold` | 558 | 0.749 (0.764) | 0.618 | 0.681 | 0.884 | 0.765 | 0.00032 s |
+| `otsu_morphology` | 558 | 0.772 (0.787) | 0.650 | 0.709 | **0.904** | 0.786 | 0.00218 s |
+| `central_component` | 558 | **0.790 (0.823)** | **0.678** | **0.749** | 0.901 | **0.817** | 0.00380 s |
 
-![Method comparison](outputs/full_run/method_comparison.png)
+![Method comparison](docs/assets/method_comparison.png)
 
 The methods improve progressively in mean Dice, IoU, precision, and specificity. Method 2 has slightly higher mean sensitivity than Method 3 because component selection can discard true disconnected brain pixels. Method 3's extra precision and specificity produce the best overall overlap.
+
+| Method | Mean Dice 95% CI | Surface Dice | HD95 (pixels) | ASSD (pixels) |
+|---|---:|---:|---:|---:|
+| `otsu_threshold` | 0.737–0.761 | 0.278 | 47.69 | 14.92 |
+| `otsu_morphology` | 0.759–0.783 | 0.307 | 43.49 | 13.15 |
+| `central_component` | **0.777–0.803** | **0.333** | **40.33** | **12.09** |
+
+![Boundary metrics](docs/assets/boundary_metric_comparison.png)
+
+## Reliability warnings
+
+The `central_component` checks flagged 31 of 558 predictions. Flagged predictions had mean Dice 0.551; unflagged predictions had mean Dice 0.804. All four cases below 0.20 Dice and 12 of 13 below 0.40 were flagged, largely through method disagreement. Only 17 of 50 cases below 0.60 were flagged, so this is a conservative review mechanism rather than a guarantee.
+
+![Reference-free warning rates](docs/assets/quality_warning_rates.png)
 
 ## Successful cases
 
@@ -64,11 +80,15 @@ The experiment supports a narrow conclusion: on this 2D test split, deterministi
 
 Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799, Infant 0.714, and FSM 0.700 mean Dice. MRI contrast, resolution, anatomy, and acquisition differences challenge a single intensity rule.
 
+![Source-level Dice](docs/assets/source_dice_comparison.png)
+
 ## Limitations
 
 - One sagittal slice per scan cannot measure 3D continuity or volumetric accuracy.
 - Only 24 scans informed parameter choice.
 - The heuristic encodes assumptions about intensity, size, connectivity, and location.
+- Warning thresholds are uncalibrated geometry heuristics and miss some poor predictions.
+- Surface distances are in pixels rather than physical millimeters.
 - Results may not transfer to another scanner, protocol, population, or mask definition.
 - Timing is specific to the local Apple-silicon software environment.
 - This is not a prospective, clinical, diagnostic, or regulatory evaluation.
