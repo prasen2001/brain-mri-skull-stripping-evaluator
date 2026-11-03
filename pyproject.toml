@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "brain-mri-skull-stripping-evaluator"
 version = "0.1.0"
-description = "Beginner-friendly classical skull-stripping baselines for 2D brain MRI"
+description = "Beginner-friendly classical skull-stripping baselines for 2D and 3D MRI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

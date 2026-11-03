@@ -1,4 +1,4 @@
-"""Evaluate the three frozen classical baselines on complete 3D NFBS volumes."""
+"""Evaluate frozen 3D baselines and an optional exploratory spatial prior."""
 
 from __future__ import annotations
 

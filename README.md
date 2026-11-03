@@ -4,7 +4,7 @@ An educational, beginner-friendly research prototype that asks a simple question
 
 > How far can understandable classical image-processing methods go when separating brain tissue from non-brain pixels and voxels?
 
-This project evaluates three fixed baselines on the official SynthStrip 2D v1.5 dataset, then tests the same ideas on complete 3D NFBS volumes. It does **not** use deep learning, train a model, or provide medical advice.
+This project evaluates three fixed baselines on the official SynthStrip 2D v1.5 dataset, tests the same ideas on complete 3D NFBS volumes, and includes an optional exploratory spatial-prior method. It does **not** use deep learning, train a model, or provide medical advice.
 
 ## What the project does
 
@@ -13,6 +13,7 @@ For each image or volume, the program loads its reference brain mask, robustly n
 1. `otsu_threshold`: one automatically selected threshold, with deterministic polarity handling.
 2. `otsu_morphology`: Otsu plus opening, closing, hole filling, and small-object removal.
 3. `central_component`: Method 2 plus a deterministic largest-central-component heuristic and final cleanup.
+4. `spatial_prior` (optional 3D experiment): Method 2 constrained by a coarse canonical-RAS ellipsoid, an inferior-neck exclusion, and morphology measured in physical millimetres.
 
 The implementation is separated into dataset loading, preprocessing, segmentation, metrics, evaluation, and visualization modules. There is no notebook-only logic and no hidden metrics library.
 
@@ -58,6 +59,12 @@ A connected component is a group of touching foreground pixels. The third method
 `area × (1 + centrality_weight × centrality)`
 
 Centrality is 1 at the image center and falls toward the corners. Area remains important, but similarly sized central anatomy is preferred over a peripheral artifact. Exact ties are resolved by label order, so the result is deterministic. This is still a heuristic: the brain may not be centered, and a bright central structure may not represent the whole brain.
+
+### Optional 3D spatial prior
+
+The exploratory fourth method encodes a deliberately coarse location hypothesis: after closest-canonical RAS reorientation, most brain tissue should lie in a superior central ellipsoid rather than the inferior neck. It intersects the unchanged morphology prediction with that region, then uses opening and closing radii in millimetres and a minimum component volume in millilitres. It reads array geometry and voxel spacing, never the reference mask.
+
+This is more restrictive and less general than the three original baselines. Off-center anatomy, unusual coverage, different orientation handling, pediatric anatomy, lesions, or postoperative changes can violate the prior. It is disabled unless `--include-spatial-prior` is supplied.
 
 ### Prediction-quality warnings
 
@@ -148,7 +155,7 @@ data/processed/synthstrip_data_v1.5_2d
 python -m pytest -q
 ```
 
-Verified result: `61 passed`.
+Verified result: `65 passed`.
 
 For the complete development checks used in this repository:
 
@@ -159,7 +166,7 @@ mypy src
 python -m pytest -q --cov=src --cov-report=term-missing
 ```
 
-The verified branch coverage was 83.6%, above the enforced 75% project floor. The suite includes subprocess and in-process CLI integration tests, complete visualization/report rendering, external-data preparation, and invalid-input cases.
+The verified branch coverage was 83.0%, above the enforced 75% project floor. The suite includes subprocess and in-process CLI integration tests, complete visualization/report rendering, external-data preparation, and invalid-input cases.
 
 ## Reproduce development tuning
 
@@ -229,6 +236,21 @@ python -m src.evaluate_3d \
 ```
 
 For a quick smoke test, add `--limit 3 --bootstrap-samples 100` and use a different output directory. The values in `configs/volume_default.yaml` are direct 3D interpretations of the frozen 2D fractions; they were not selected after inspecting NFBS results.
+
+### Exploratory spatial-prior follow-up
+
+NFBS had already been inspected before the spatial prior was designed, so this command is a **second-look exploratory analysis**, not a fresh external validation. It reuses the previously verified baseline rows and computes only the new method:
+
+```bash
+python -m src.evaluate_3d \
+  --data-dir data/raw/nfbs_extracted/NFBS_Dataset \
+  --output-dir outputs/nfbs_3d_spatial_full \
+  --seed 42 \
+  --include-spatial-prior \
+  --reuse-baseline-metrics outputs/nfbs_3d_full/per_volume_metrics.csv
+```
+
+The reuse path validates that every requested subject has exactly one row for each original method. It then recomputes combined summaries, bootstrap intervals, paired tests, failure categories, and figures. Omit `--reuse-baseline-metrics` to recompute all four predictions from source data.
 
 ## Optional local Streamlit explorer
 
@@ -388,6 +410,23 @@ Morphology improved mean Dice over raw Otsu by 0.0334 (paired 95% bootstrap CI 0
 
 All methods still performed poorly in absolute terms. Morphology's mean precision was only 0.445 while sensitivity was 0.757, and 124 of 125 predictions were retrospectively categorized as over-segmentation. Orthogonal reviews show scalp, face, and neck tissue surviving the intensity rule. Using a full volume gives more spatial context, but it does not make thresholding understand anatomy.
 
+## Exploratory 3D spatial-prior results
+
+These measurements use the same 125 NFBS subjects after their baseline failures had already been inspected. They demonstrate whether the proposed spatial restriction addresses the observed error mode; they do not provide an unbiased external estimate.
+
+| Method | Mean Dice | Median Dice | Mean IoU | Precision | Sensitivity | Specificity | Surface Dice | HD95 (mm) | Mean time/volume |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `otsu_morphology` | 0.5589 | 0.5645 | 0.3913 | 0.4452 | 0.7573 | 0.8911 | 0.1414 | 77.86 | 1.130 s |
+| `spatial_prior` | **0.7537** | **0.7558** | **0.6079** | **0.7238** | **0.7947** | **0.9658** | **0.2160** | **21.94** | 2.104 s |
+
+![Exploratory spatial-prior method comparison](docs/assets/nfbs_3d_spatial_method_comparison.png)
+
+The new method improved Dice over morphology by 0.1948 on average (paired 95% bootstrap CI 0.1879–0.2018) and won on all 125 subjects. Its own mean Dice 95% interval was 0.7437–0.7635. Precision increased substantially without reducing average sensitivity, supporting the hypothesis that inferior and peripheral non-brain anatomy caused much of the earlier error.
+
+![Exploratory spatial-prior Dice distribution](docs/assets/nfbs_3d_spatial_dice_distribution.png)
+
+The result is not uniformly accurate. Dice ranged from 0.515 to 0.876. Only 21 of 125 results met the strict retrospective acceptable category; 46 were boundary mismatches, 29 remained over-segmented, 24 had mixed overlap error, and five were under-segmented. The fixed ellipsoid can remove valid brain at its boundary and cannot replace an anatomical model.
+
 ## Failure analysis
 
 Successful cases such as `ixi_mra_138` (Dice 0.989), `asl_epi_124` (0.983), and `ixi_mra_013` (0.979) contain a dominant connected brain region with strong separation from background. Morphology removes small fragments and the central-component rule discards peripheral anatomy.
@@ -405,6 +444,7 @@ The source-level central-component mean Dice also varied: ASL 0.851, QIN 0.852, 
 - The primary SynthStrip experiment contains one 2D sagittal slice per scan. The separate NFBS experiment measures complete 3D volumes, but only for one external T1 dataset.
 - Otsu assumes two separable intensity groups, while MRI anatomy and artifacts are multi-modal and spatially complex.
 - The centrality heuristic can select the wrong anatomy when the brain is off-center or internal tissue is especially bright.
+- The optional spatial prior assumes canonical orientation and typical adult brain position. Its NFBS result is exploratory because its design was motivated by already-inspected NFBS failures.
 - Ground-truth definitions can differ between datasets, especially around cerebrospinal fluid and boundaries.
 - Development tuning used only 24 scans. Test metrics describe this dataset and split, not every scanner, population, disease, or protocol.
 - The constructed 2D NFBS experiment selects one deterministic, mask-independent center slice and does not reproduce SynthStrip's original slice-selection procedure. The complete 3D NFBS experiment avoids slice selection but still has severe over-segmentation.
@@ -419,7 +459,7 @@ This software is an educational research prototype. It is **not** diagnostic sof
 
 ## Future work
 
-The complete-volume result makes the next question concrete: determine whether stronger classical spatial priors or a small U-Net trained with a strict scan-level training/development/test protocol can separate brain from adjacent scalp and neck tissue. NFBS has now been inspected as external evaluation, so a future learned experiment should either pre-register how it will be used as a final test or reserve another untouched dataset. Bias-field correction, head/neck cropping, atlas-guided initialization, and watershed or graph-cut refinement are reasonable classical experiments before deep learning. An autoencoder, pretrained encoder, transformer, or regression model should be introduced only with a clear question and leakage-safe evaluation—not because it sounds more advanced.
+The spatial-prior result supports spatial restriction as a useful hypothesis, but the next estimate must come from data not used to motivate it. Reserve a new external dataset before further parameter changes. Within a declared development set, bias-field correction, adaptive head localization, atlas-guided initialization, watershed, or graph-cut refinement could replace the fixed ellipsoid. A later small U-Net should use a strict subject-level split and the untouched external dataset. An autoencoder, pretrained encoder, transformer, or regression model should be introduced only with a clear question and leakage-safe evaluation—not because it sounds more advanced.
 
 ## Project map
 
@@ -444,7 +484,7 @@ src/volume_segmentation.py          three deterministic 3D baselines
 src/evaluate_3d.py                  complete-volume NFBS CLI
 src/volume_visualization.py         3D aggregate and orthogonal review figures
 streamlit_app.py                    optional public-dataset explorer
-tests/                              61 unit, integration, rendering, and app tests
+tests/                              65 unit, integration, rendering, and app tests
 docs/assets/                        tracked aggregate result charts
 INTERVIEW_PREP.md                   beginner study guide
 PROJECT_REPORT.md                   concise experimental report
