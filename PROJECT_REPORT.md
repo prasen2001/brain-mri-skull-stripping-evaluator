@@ -10,6 +10,8 @@ The experiment uses the official SynthStrip 2D dataset, version 1.5. It contains
 
 The archive SHA-256 matched the official value before extraction. All 582 image-mask pairs loaded successfully, had matching spatial dimensions, and used binary masks. No test pair was skipped. IXI content is CC BY-SA 4.0; other redistributed content is CC BY 4.0. See the dataset README and the citation in the project README.
 
+External validation uses the open NFBS repository: 125 defaced, anonymized T1 volumes with manually corrected brain masks. The 1,751,464,473-byte archive matched the project-pinned SHA-256 `fd616b9ea21aad3d0d4cd05a25a71f4a3c251140df38188e58e499254440d2cc`. Each volume was reoriented to closest canonical coordinates and its center sagittal slice was selected from image geometry alone. No NFBS mask influenced slice selection, parameter selection, or tuning.
+
 ## Methods
 
 All images were clipped at their per-image 1st and 99th intensity percentiles and scaled to `[0, 1]`.
@@ -22,6 +24,8 @@ No ground-truth mask is used during prediction. No method learns from the test s
 
 The evaluator also records surface Dice at one-pixel tolerance plus HD95 and ASSD in both pixels and physical millimeters read from the NIfTI header. Reference-free checks measure predicted area, connected components, centroid location, border contact, and disagreement among methods to flag masks for review.
 
+A separate retrospective taxonomy uses the reference-derived metrics after evaluation. It labels dominant outcomes such as under-segmentation, over-segmentation, boundary mismatch, fragmentation, border leakage, likely polarity failure, and wrong-component selection. These labels explain known results; they are not deploy-time confidence predictions.
+
 ## Experimental design
 
 A grid of 81 parameter combinations was evaluated on only the 24 development scans. The chosen configuration used opening fraction 0.008, closing fraction 0.004, minimum component area fraction 0.005, and centrality weight 0.75. On development data, Method 2 reached mean Dice 0.744 and Method 3 reached 0.750.
@@ -29,6 +33,8 @@ A grid of 81 parameter combinations was evaluated on only the 24 development sca
 The warning thresholds were separately audited on the same 24 development scans. For a predefined failure threshold of Dice below 0.40, a small grid recommended the existing defaults and identified both development failures with no false warning. This tiny calibration result is not a general accuracy claim.
 
 The final CLI then evaluated the fixed configuration on 558 held-out test scans using seed 42. Metrics were calculated per image, then summarized across images. Confidence intervals and paired method differences used 1,000 scan-level bootstrap resamples with the same seed. Paired Wilcoxon tests used Holm correction across reported comparisons. Processing time covers segmentation only. The complete configuration and package versions are in `outputs/full_run/run_config.json`.
+
+The exact same configuration was then frozen and run once on all 125 NFBS subjects. NFBS was not used to choose thresholds, morphology radii, centrality weight, warning rules, or failure-category thresholds.
 
 ## Results
 
@@ -62,6 +68,26 @@ The `central_component` checks flagged 31 of 558 predictions. Flagged prediction
 
 ![Reference-free warning rates](docs/assets/quality_warning_rates.png)
 
+## Retrospective failure taxonomy
+
+For `central_component` on SynthStrip, the primary categories were 273 over-segmentations, 221 acceptable cases, 37 under-segmentations, nine mixed errors, eight boundary mismatches, eight wrong-component selections, and two border leakages. The strict acceptable category requires Dice at least 0.80 and no dominant error reason.
+
+![SynthStrip failure categories](docs/assets/failure_category_distribution.png)
+
+## External NFBS evaluation
+
+| Method | N | Dice mean (median) | IoU mean | Precision | Sensitivity | HD95 (mm) |
+|---|---:|---:|---:|---:|---:|---:|
+| `otsu_threshold` | 125 | 0.506 (0.515) | 0.341 | 0.450 | **0.582** | 75.49 |
+| `otsu_morphology` | 125 | 0.525 (0.550) | 0.362 | 0.504 | 0.556 | 74.09 |
+| `central_component` | 125 | **0.537 (0.596)** | **0.396** | **0.615** | 0.500 | **66.51** |
+
+![NFBS external method comparison](docs/assets/nfbs_external_method_comparison.png)
+
+The central-component method still had the best mean overlap, but its mean Dice dropped by 0.2535 relative to SynthStrip. Its NFBS standard deviation was 0.2257 and its range was 0.000–0.888. The external taxonomy found 44 under-segmentations, 33 boundary mismatches, 31 mixed errors, 12 wrong-component selections, and five over-segmentations. No prediction met the strict acceptable rule.
+
+![NFBS failure categories](docs/assets/nfbs_external_failure_categories.png)
+
 ## Successful cases
 
 ![Best cases](outputs/full_run/best_cases.png)
@@ -84,7 +110,7 @@ These failures explain why the later method is not uniformly better. Selecting o
 
 ## Interpretation
 
-The experiment supports a narrow conclusion: on this 2D test split, deterministic cleanup and component selection improve average overlap over raw Otsu. It does not show that thresholding is clinically adequate. Method 3's standard deviation is 0.156 and its Dice range is 0.085–0.989, so a good average coexists with catastrophic failures.
+The internal experiment supports a narrow conclusion: on the SynthStrip 2D test split, deterministic cleanup and component selection improve average overlap over raw Otsu. The NFBS result adds a stronger conclusion: the absolute performance does not transfer reliably to a different T1 acquisition and field of view. It does not show that thresholding is clinically adequate.
 
 Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799, Infant 0.714, and FSM 0.700 mean Dice. It also varies by modality encoded in the identifiers: ASL/EPI 0.952, MRA 0.947, DWI 0.912, FLAIR 0.904, T2 0.775, PD 0.757, T1 0.755, and qT1 0.514. MRI contrast, resolution, anatomy, and acquisition differences challenge a single intensity rule.
 
@@ -100,10 +126,11 @@ Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799
 - Warning thresholds were calibrated on only 24 development scans. They remain geometry heuristics rather than confidence probabilities and miss some poor predictions.
 - Millimeter boundary distances depend on NIfTI header spacing and measure only a 2D contour, not a complete 3D surface.
 - Results may not transfer to another scanner, protocol, population, or mask definition.
+- NFBS evaluates a deterministic 2D center slice derived from each 3D volume. It is external data, but it is not a full-volume experiment and its slice construction differs from SynthStrip's published 2D archive.
 - Timing is specific to the local Apple-silicon software environment.
 - This is not a prospective, clinical, diagnostic, or regulatory evaluation.
 
 ## Proposed next experiment
 
-First run the frozen classical pipeline on a second licensed dataset to measure external generalization and recalibrate warnings without touching this test set. Then train a small 2D U-Net with a leakage-safe training/development/test design and compare it with these unchanged baselines using the same metrics and paired case analysis. The key question should be whether learned spatial features reduce the qT1/T2 and cross-source failures—not merely whether the model has more parameters.
+Train a small 2D U-Net with a leakage-safe training/development/test design and compare it with these unchanged baselines. Keep NFBS untouched as external evaluation. The specific question is whether learned spatial features reduce the observed NFBS under-segmentation and wrong-component failures—not merely whether a model has more parameters. A later experiment should process complete 3D volumes and measure volumetric continuity.
 

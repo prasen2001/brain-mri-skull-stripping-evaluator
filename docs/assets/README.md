@@ -9,3 +9,7 @@ The tracked figures cover overall overlap, source and modality stratification,
 physical boundary quality, paired per-scan improvement, and prediction-only
 warning rates. They were refreshed from the verified 558-scan test run with
 seed 42.
+
+The two `nfbs_external_*` figures summarize a separate 125-subject NFBS run
+using frozen parameters. Only aggregate charts are tracked; individual MRI case
+figures remain in ignored local outputs.

@@ -93,11 +93,11 @@ A U-Net can learn multi-scale spatial patterns and boundaries from labeled examp
 
 ### Why is this not a clinical product?
 
-It is a retrospective educational prototype tested on one public 2D dataset. It has catastrophic failure cases, no prospective clinical validation, no regulatory review, no workflow integration, and no evidence for every patient population or scanner.
+It is a retrospective educational prototype tested on 2D slices from two public datasets. External NFBS performance was poor, it has catastrophic failure cases, and there is no prospective clinical validation, regulatory review, workflow integration, or evidence for every population and scanner.
 
 ## 60-second explanation
 
-“I built a reproducible evaluation of three classical skull-stripping baselines on the official SynthStrip 2D dataset. Skull stripping is binary segmentation: keeping brain pixels and removing skull and other non-brain anatomy. I started with Otsu thresholding, added morphological cleanup, and then selected a large central connected component. I used the authors' 24-scan validation split to choose parameters and kept all 558 test scans held out. Mean test Dice improved from 0.749 to 0.772 to 0.790. A paired scan-level analysis measured the final improvement over raw Otsu as 0.041 Dice, with a 95% interval from 0.035 to 0.047. I also added physical boundary metrics, modality analysis, prediction-only warning checks, and a small public-dataset explorer. The main lesson is that spatial cleanup helps, but the severe qT1 and T2 failures show why these heuristics are not clinically reliable.”
+“I built a reproducible evaluation of three classical skull-stripping baselines. On 558 held-out SynthStrip slices, mean Dice improved from 0.749 for Otsu to 0.772 with morphology and 0.790 with central-component selection. I then froze every parameter and evaluated 125 canonical center slices from the independent NFBS dataset. The best mean Dice fell to 0.537, with several zero-overlap cases. A retrospective taxonomy showed under-segmentation, boundary mismatch, and wrong-component selection. My main lesson is that simple spatial cleanup improves an internal baseline, but external validation exposes how poorly intensity heuristics generalize.”
 
 ## Two-minute detailed explanation
 
@@ -107,7 +107,9 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 
 “I implemented TP, TN, FP, FN, Dice, IoU, precision, sensitivity, specificity, surface Dice, HD95, and ASSD directly and unit-tested perfect, partial, no-overlap, boundary, and empty cases. HD95 and ASSD are available in pixels and physical millimeters from the NIfTI spacing. A development-only grid selected morphology parameters. On the held-out 558 scans, mean Dice was 0.749, 0.772, and 0.790. Method 3's 95% bootstrap interval was 0.777 to 0.803. It improved precision and specificity but was slightly less sensitive than Method 2 because selecting one component can discard real brain pixels.
 
-“Because the methods process the same scans, I also calculated paired improvements rather than comparing only separate means. Method 3 improved over raw Otsu by 0.041 Dice on average and won on 456 of 558 scans. I generated source- and modality-specific statistics, physical boundary plots, a ranked failure-review report, and warning summaries. For the best method, flagged test results averaged 0.551 Dice versus 0.804 when unflagged, but the rules missed many moderate failures, so they are triage signals rather than probabilities. I would not claim clinical adequacy. The next experiment would validate the frozen pipeline on an external dataset before comparing a leakage-safe U-Net.”
+“Because the methods process the same scans, I also calculated paired improvements rather than comparing only separate means. Method 3 improved over raw Otsu by 0.041 Dice on average and won on 456 of 558 SynthStrip scans. I generated source- and modality-specific statistics, physical boundary plots, a ranked review report, and a reference-based failure taxonomy.
+
+“For external validation, I used the open NFBS repository of 125 defaced T1 volumes. I selected each canonical center sagittal slice using image geometry, never the mask, and kept all SynthStrip-tuned settings frozen. Method 3 still ranked first, but mean Dice dropped from 0.790 to 0.537. That result is more scientifically useful than hiding the failure: it demonstrates domain shift and motivates a leakage-safe learned model. I would not claim clinical adequacy.”
 
 ## Twelve likely interview questions
 
@@ -124,7 +126,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
    Background often dominates. A nearly all-background prediction could look accurate while missing the brain. I report it only as a secondary field and emphasize Dice, IoU, precision, sensitivity, and specificity.
 
 5. **Which method won and why?**  
-   `central_component` had the best mean Dice, 0.790, and IoU, 0.678. It removed peripheral false-positive components, which improved precision and specificity. It did not win every case.
+   `central_component` had the best mean Dice on both datasets: 0.790 on SynthStrip and 0.537 on NFBS. It often removed peripheral false-positive components, but external performance was still poor and it sometimes selected entirely wrong anatomy.
 
 6. **What surprised you?**  
    The severe T2 failures. One case had precision 1.0 but sensitivity 0.045: the small region it predicted was correct, yet it missed almost the entire brain. That made the value of multiple metrics very concrete.
@@ -133,13 +135,13 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
    Method 3's Dice standard deviation was 0.156, so performance varied widely. Mean performance alone is not enough; case plots and minimum values reveal risk.
 
 8. **What would you improve first?**  
-   I would first run the frozen pipeline on a second licensed dataset to test external generalization. After that, I would establish a training split and compare a small U-Net while preserving an untouched final test set.
+   External validation is now complete and revealed a large generalization gap. I would next establish a leakage-safe training and development split for a small U-Net, while preserving NFBS as untouched external evaluation, then add complete 3D evaluation.
 
 9. **Did you implement the SynthStrip neural model?**  
    No. I used its public 2D evaluation dataset and masks. This version deliberately implements only classical baselines. The original SynthStrip method is deep learning and is cited as the data source.
 
 10. **What do you still not know?**  
-    I have not demonstrated 3D performance, clinical usefulness, or cross-dataset generalization. I am comfortable explaining the implemented 2D pipeline and its measurements, but I would seek expert guidance on clinical mask definitions and evaluation design.
+    I have demonstrated poor transfer to one external T1 dataset, not generalization across all acquisitions. I still have not demonstrated 3D performance, clinical usefulness, or prospective validity. I would seek expert guidance on clinical mask definitions and evaluation design.
 
 11. **Are the quality warnings confidence scores?**
     No. They are deterministic geometry and method-disagreement rules. Their thresholds were selected on only 24 development scans, and their observed test behavior is reported honestly. They are not calibrated probabilities and need external validation.
@@ -167,6 +169,8 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - **Erosion/dilation:** operations that shrink/expand binary foreground.
 - **False negative:** actual brain that the method missed.
 - **False positive:** non-brain that the method kept.
+- **Domain shift:** a change between development and deployment data that alters performance.
+- **External validation:** evaluating frozen choices on an independent dataset not used for tuning.
 - **Ground truth:** reference annotation used for evaluation.
 - **IoU:** intersection divided by union.
 - **HD95:** robust boundary distance using the 95th percentile; lower is better.
@@ -192,7 +196,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - Do not say 0.790 Dice is “good enough” without context; the minimum was 0.085.
 - Do not say you trained SynthStrip or implemented its neural network.
 - Do not say thresholding understands anatomy.
-- Do not generalize the result to unseen scanners, diseases, populations, 3D volumes, or datasets.
+- Do not generalize beyond the evaluated SynthStrip and NFBS 2D constructions, scanners, or populations.
 - Do not claim deep-learning expertise from this classical project.
 - Do not hide the T2 failures or quote only the best cases.
 - Do not call warning flags calibrated confidence or proof that an unflagged mask is correct.
@@ -206,6 +210,7 @@ It is a retrospective educational prototype tested on one public 2D dataset. It 
 - Open `outputs/full_run/method_comparison.png`.
 - Open `docs/assets/paired_dice_improvement.png` and explain why comparisons are paired.
 - Open `docs/assets/modality_dice_comparison.png` and discuss qT1/T2 limitations.
+- Open `docs/assets/nfbs_external_method_comparison.png` and explain the 0.790-to-0.537 generalization drop.
 - Open `docs/assets/quality_warning_rates.png` and explain that warnings are conservative.
 - Open one best and one worst overlay; explain TP, FP, and FN.
 - Show `summary_metrics.csv` and emphasize 558 held-out scans.

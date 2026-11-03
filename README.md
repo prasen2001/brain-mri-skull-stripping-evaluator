@@ -110,6 +110,10 @@ Please cite:
 
 > Hoopes A, Mora JS, Dalca AV, Fischl B, Hoffmann M. SynthStrip: Skull-Stripping for Any Brain Image. *NeuroImage*. 2022;260:119474. [doi:10.1016/j.neuroimage.2022.119474](https://doi.org/10.1016/j.neuroimage.2022.119474)
 
+For external validation, the project also uses the [Neurofeedback Skull-stripped (NFBS) repository](https://preprocessed-connectomes-project.org/NFB_skullstripped/). It contains 125 anonymized, defaced T1 volumes and manually corrected masks. Its accompanying paper describes the repository as completely open without an application or data-usage agreement. The project repository is MIT-licensed. Please cite:
+
+> Puccio B, Pooley JP, Pellman JS, Taverna EC, Craddock RC. The preprocessed connectomes project repository of manually corrected skull-stripped T1-weighted anatomical MRI data. *GigaScience*. 2016;5:45. [doi:10.1186/s13742-016-0150-5](https://doi.org/10.1186/s13742-016-0150-5)
+
 Dataset files are excluded from Git. Do not add private or clinical scans to this repository.
 
 ## Installation on Apple silicon macOS
@@ -144,7 +148,7 @@ data/processed/synthstrip_data_v1.5_2d
 python -m pytest -q
 ```
 
-Verified result: `38 passed`.
+Verified result: `49 passed`.
 
 For the complete development checks used in this repository:
 
@@ -155,7 +159,7 @@ mypy src
 python -m pytest -q --cov=src --cov-report=term-missing
 ```
 
-The verified branch coverage was 57.3%, above the explicit 55% project floor. The test suite includes a subprocess integration test that creates a temporary NIfTI dataset and exercises the complete CLI.
+The verified branch coverage was 80.6%, above the enforced 75% project floor. The suite includes a subprocess CLI integration test, complete visualization/report rendering, external-data preparation, and invalid-input cases.
 
 ## Reproduce development tuning
 
@@ -197,6 +201,22 @@ On a system where Matplotlib cannot write its normal user cache, prefix either e
 
 The CLI also accepts overrides such as `--opening-radius-fraction`, `--closing-radius-fraction`, `--minimum-component-area-fraction`, `--centrality-weight`, normalization percentiles, `--boundary-tolerance-pixels`, and `--bootstrap-samples`. Do not tune segmentation parameters on the held-out test metrics.
 
+## Reproduce the NFBS external evaluation
+
+The external archive is approximately 1.7 GB. This command downloads it from the official project endpoint, checks the pinned size and SHA-256, rejects unsafe archive members, and creates one canonical center sagittal slice per subject. Slice selection uses image geometry only—not the reference mask.
+
+```bash
+python -m scripts.prepare_nfbs_external
+
+python -m src.evaluate \
+  --data-dir data/processed/nfbs_2d_external \
+  --output-dir outputs/nfbs_external_run \
+  --subset test \
+  --seed 42
+```
+
+The SynthStrip-tuned parameters are frozen for this run. Do not tune them on NFBS and continue calling the result external validation.
+
 ## Optional local Streamlit explorer
 
 After the command-line pipeline is working, install the separate UI dependency and start the public-dataset explorer:
@@ -234,6 +254,8 @@ modality_summary_metrics.csv   metrics grouped by encoded MRI modality and metho
 bootstrap_confidence_intervals.csv  deterministic 95% intervals for mean metrics
 paired_method_comparisons.csv  paired improvements, confidence intervals, wins, and tests
 quality_summary.csv            warning rates and warning-type counts
+failure_analysis.csv           retrospective category and severity per prediction
+failure_category_summary.csv   mutually exclusive category counts per method
 run_config.json                seed, parameters, versions, platform, and counts
 invalid_pairs.csv              only when invalid inputs are found
 method_comparison.png
@@ -245,6 +267,7 @@ modality_dice_comparison.png
 paired_dice_improvement.png
 quality_warning_rates.png
 boundary_metric_comparison.png
+failure_category_distribution.png
 best_cases.png
 worst_cases.png
 overlays/                      six individual five-panel case figures
@@ -310,6 +333,28 @@ The scan identifiers encode broad modality groups. For `central_component`, mean
 
 ![Modality-level Dice comparison](docs/assets/modality_dice_comparison.png)
 
+### Retrospective failure categories
+
+After evaluation, the program assigns deterministic categories using reference-derived metrics. These explain observed errors; unlike the quality warnings, they are unavailable when no reference mask exists. For `central_component`, 221 of 558 SynthStrip predictions (39.6%) met the strict “acceptable” rule (Dice at least 0.80 with no dominant error reason). The most common primary error was over-segmentation (273 scans); eight cases were classified as wrong-component selection.
+
+![SynthStrip failure categories](docs/assets/failure_category_distribution.png)
+
+## External NFBS results
+
+These are real measurements from all **125 NFBS subjects** using the frozen SynthStrip configuration. Each 3D volume contributed its canonical center sagittal slice. The result tests transfer to one additional T1 acquisition; it is not a 3D evaluation.
+
+| Method | Mean Dice | Median Dice | Mean IoU | Precision | Sensitivity | HD95 (mm) |
+|---|---:|---:|---:|---:|---:|---:|
+| `otsu_threshold` | 0.5056 | 0.5152 | 0.3414 | 0.4497 | 0.5824 | 75.49 |
+| `otsu_morphology` | 0.5252 | 0.5504 | 0.3625 | 0.5043 | 0.5559 | 74.09 |
+| `central_component` | **0.5368** | **0.5955** | **0.3960** | **0.6145** | 0.4999 | **66.51** |
+
+![NFBS external method comparison](docs/assets/nfbs_external_method_comparison.png)
+
+The central-component mean Dice dropped from 0.7903 on SynthStrip to 0.5368 on NFBS. Its Dice standard deviation increased to 0.2257 and its minimum was 0.0. The taxonomy found 44 under-segmentations, 33 boundary mismatches, 31 mixed errors, 12 wrong-component selections, and five over-segmentations; no NFBS prediction met the strict acceptable rule. This is direct evidence that the classical intensity and location assumptions do not generalize reliably.
+
+![NFBS external failure categories](docs/assets/nfbs_external_failure_categories.png)
+
 ## Failure analysis
 
 Successful cases such as `ixi_mra_138` (Dice 0.989), `asl_epi_124` (0.983), and `ixi_mra_013` (0.979) contain a dominant connected brain region with strong separation from background. Morphology removes small fragments and the central-component rule discards peripheral anatomy.
@@ -329,6 +374,7 @@ The source-level central-component mean Dice also varied: ASL 0.851, QIN 0.852, 
 - The centrality heuristic can select the wrong anatomy when the brain is off-center or internal tissue is especially bright.
 - Ground-truth definitions can differ between datasets, especially around cerebrospinal fluid and boundaries.
 - Development tuning used only 24 scans. Test metrics describe this dataset and split, not every scanner, population, disease, or protocol.
+- NFBS adds one independent T1 acquisition, but both evaluations use only one 2D sagittal slice per scan. NFBS slice selection is deterministic and mask-independent, yet it does not reproduce the original SynthStrip slice-selection procedure.
 - Quality-warning thresholds are geometry heuristics calibrated on only 24 development scans, not confidence estimates. Some poor masks are not flagged and unusual valid masks can be flagged.
 - Physical boundary distances use NIfTI header spacing, but they remain 2D slice measurements and do not describe a 3D anatomical surface.
 - Timing is machine- and software-dependent.
@@ -340,13 +386,14 @@ This software is an educational research prototype. It is **not** diagnostic sof
 
 ## Future work
 
-A sensible next experiment is external validation or a small 2D U-Net trained with a strict scan-level training/development/test protocol and compared against these unchanged baselines. Additional work could evaluate full 3D consistency and warning calibration on an independent dataset. An autoencoder, pretrained encoder, transformer, or regression model should be introduced only with a clear question and leakage-safe evaluation—not because it sounds more advanced.
+The external result makes the next question concrete: determine whether a small 2D U-Net trained with a strict scan-level training/development/test protocol can reduce NFBS under-segmentation and wrong-component failures while preserving the untouched NFBS evaluation. Additional work should evaluate complete 3D volumes rather than isolated slices. An autoencoder, pretrained encoder, transformer, or regression model should be introduced only with a clear question and leakage-safe evaluation—not because it sounds more advanced.
 
 ## Project map
 
 ```text
 configs/default.yaml               tuned classical parameters
 scripts/download_data.py           official download, checksum, safe extraction
+scripts/prepare_nfbs_external.py   safe NFBS download and 2D preparation
 scripts/tune_on_development.py      development-only grid search
 scripts/calibrate_quality_warnings.py development-only warning calibration
 src/dataset.py                      discovery, NIfTI loading, validation
@@ -355,12 +402,15 @@ src/segmentation.py                 three classical methods
 src/metrics.py                      overlap and boundary metric formulas
 src/quality.py                      reference-free mask diagnostics
 src/calibration.py                  warning-calibration measurements
+src/failure_analysis.py             retrospective outcome taxonomy
 src/evaluate.py                     command-line evaluation
 src/visualization.py                charts and five-panel cases
 streamlit_app.py                    optional public-dataset explorer
-tests/                              38 unit, integration, and app tests
+tests/                              49 unit, integration, rendering, and app tests
 docs/assets/                        tracked aggregate result charts
 INTERVIEW_PREP.md                   beginner study guide
 PROJECT_REPORT.md                   concise experimental report
+EXTERNAL_VALIDATION.md              separate NFBS protocol and results
+CHANGELOG.md                        notable changes and known limitations
 ```
 
