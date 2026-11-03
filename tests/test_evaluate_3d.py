@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -74,4 +75,7 @@ def test_complete_3d_cli_on_synthetic_volumes(tmp_path: Path) -> None:
     assert {"hd95_voxels", "hd95_mm", "primary_failure_category"} <= set(
         metrics.columns
     )
+    run_config = json.loads((output_dir / "run_config.json").read_text())
+    expected_best_method = metrics.groupby("method")["dice"].mean().idxmax()
+    assert run_config["best_method_by_mean_dice"] == expected_best_method
     assert len(list((output_dir / "orthogonal_reviews").glob("*.png"))) == 6

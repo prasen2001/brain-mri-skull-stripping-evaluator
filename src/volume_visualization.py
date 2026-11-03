@@ -81,6 +81,7 @@ def _error_map(prediction: np.ndarray, reference: np.ndarray) -> np.ndarray:
 
 def create_orthogonal_review(
     pair: VolumePair,
+    method: str,
     dice: float,
     output_path: Path,
     config: VolumeMorphologyConfig,
@@ -90,7 +91,7 @@ def create_orthogonal_review(
     """Render center sagittal, coronal, and axial views with labeled errors."""
     image, reference, _ = load_volume_pair(pair)
     normalized = robust_normalize(image, lower_percentile, upper_percentile)
-    prediction, _ = segment_volume(normalized, "central_component", config)
+    prediction, _ = segment_volume(normalized, method, config)
     errors = _error_map(prediction, reference)
     orientations = ((0, "Sagittal"), (1, "Coronal"), (2, "Axial"))
     figure, axes = plt.subplots(3, 3, figsize=(13, 13))
@@ -128,7 +129,7 @@ def create_orthogonal_review(
         loc="lower center",
     )
     figure.suptitle(
-        f"3D central-component review: {pair.identifier} | Dice={dice:.3f}",
+        f"3D {method} review: {pair.identifier} | Dice={dice:.3f}",
         fontsize=15,
     )
     figure.tight_layout(rect=(0, 0, 1, 0.97))
@@ -142,28 +143,31 @@ def create_volume_visualizations(
     config: VolumeMorphologyConfig,
     lower_percentile: float,
     upper_percentile: float,
-) -> None:
-    """Create aggregate plots and three best/worst orthogonal reviews."""
+) -> str:
+    """Create plots and reviews for the method with best mean Dice."""
     sns.set_theme(style="whitegrid", context="notebook")
     plot_volume_method_comparison(metrics, output_dir)
     plot_volume_dice_distribution(metrics, output_dir)
-    central = metrics[metrics["method"] == "central_component"].sort_values(
+    best_method = str(metrics.groupby("method")["dice"].mean().idxmax())
+    ranked = metrics[metrics["method"] == best_method].sort_values(
         ["dice", "identifier"], ascending=[False, True]
     )
     review_dir = output_dir / "orthogonal_reviews"
     review_dir.mkdir(parents=True, exist_ok=True)
     selections = (
-        ("best", central.head(3)),
-        ("worst", central.tail(3).sort_values(["dice", "identifier"])),
+        ("best", ranked.head(3)),
+        ("worst", ranked.tail(3).sort_values(["dice", "identifier"])),
     )
     for group, selection in selections:
         for rank, (_, row) in enumerate(selection.iterrows(), start=1):
             identifier = str(row["identifier"])
             create_orthogonal_review(
                 pairs[identifier],
+                best_method,
                 float(row["dice"]),
                 review_dir / f"{group}_{rank}_{identifier}.png",
                 config,
                 lower_percentile,
                 upper_percentile,
             )
+    return best_method

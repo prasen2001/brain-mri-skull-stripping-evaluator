@@ -180,7 +180,7 @@ def run(args: argparse.Namespace) -> None:
         pd.DataFrame(invalid).to_csv(args.output_dir / "invalid_pairs.csv", index=False)
 
     pair_map = {pair.identifier: pair for pair in evaluated}
-    create_volume_visualizations(
+    best_method = create_volume_visualizations(
         metrics, pair_map, args.output_dir, config, lower, upper
     )
     run_config = {
@@ -194,6 +194,7 @@ def run(args: argparse.Namespace) -> None:
         "n_evaluated": len(evaluated),
         "n_invalid": len(invalid),
         "methods": list(METHOD_NAMES),
+        "best_method_by_mean_dice": best_method,
         "effective_parameters": effective,
         "parameters_tuned_on_nfbs": False,
         "python": platform.python_version(),
