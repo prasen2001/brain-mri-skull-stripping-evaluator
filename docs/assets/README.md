@@ -13,3 +13,8 @@ seed 42.
 The two `nfbs_external_*` figures summarize a separate 125-subject NFBS run
 using frozen parameters. Only aggregate charts are tracked; individual MRI case
 figures remain in ignored local outputs.
+
+The two `nfbs_3d_*` figures summarize the verified complete-volume run on the
+same 125 subjects. They contain only aggregate measurements. Orthogonal MRI
+review figures remain under ignored `outputs/nfbs_3d_full/` paths and are not
+published in the repository.

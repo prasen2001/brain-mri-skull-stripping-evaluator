@@ -2,7 +2,7 @@
 
 ## Objective
 
-Evaluate three understandable classical image-processing baselines for 2D brain MRI skull stripping before attempting deep learning. The research question is whether morphology and anatomical location heuristics improve a simple intensity threshold across varied scans.
+Evaluate three understandable classical image-processing baselines for brain MRI skull stripping before attempting deep learning. The research question is whether morphology and anatomical location heuristics improve a simple intensity threshold across varied 2D scans and complete 3D volumes.
 
 ## Dataset
 
@@ -12,6 +12,8 @@ The archive SHA-256 matched the official value before extraction. All 582 image-
 
 External validation uses the open NFBS repository: 125 defaced, anonymized T1 volumes with manually corrected brain masks. The 1,751,464,473-byte archive matched the project-pinned SHA-256 `fd616b9ea21aad3d0d4cd05a25a71f4a3c251140df38188e58e499254440d2cc`. Each volume was reoriented to closest canonical coordinates and its center sagittal slice was selected from image geometry alone. No NFBS mask influenced slice selection, parameter selection, or tuning.
 
+The same verified NFBS files also support a complete-volume experiment. All 125 image-mask pairs had matching 3D shapes, canonical affines, and valid physical voxel spacing; none was skipped. This experiment uses the entire volume rather than selecting one slice.
+
 ## Methods
 
 All images were clipped at their per-image 1st and 99th intensity percentiles and scaled to `[0, 1]`.
@@ -19,6 +21,8 @@ All images were clipped at their per-image 1st and 99th intensity percentiles an
 1. `otsu_threshold` applies Otsu's two-class threshold and chooses bright or dark polarity with a deterministic center/area/border score.
 2. `otsu_morphology` adds opening, closing, hole filling, and scale-aware small-object removal.
 3. `central_component` adds a deterministic area-and-centrality component score, retains one component, fills holes, and performs final closing.
+
+The 3D implementation preserves these stable method names but uses spherical structuring elements, 26-neighbor connected components, scale-aware volume thresholds, and full 3D surfaces. No method uses the reference mask during prediction.
 
 No ground-truth mask is used during prediction. No method learns from the test set.
 
@@ -35,6 +39,8 @@ The warning thresholds were separately audited on the same 24 development scans.
 The final CLI then evaluated the fixed configuration on 558 held-out test scans using seed 42. Metrics were calculated per image, then summarized across images. Confidence intervals and paired method differences used 1,000 scan-level bootstrap resamples with the same seed. Paired Wilcoxon tests used Holm correction across reported comparisons. Processing time covers segmentation only. The complete configuration and package versions are in `outputs/full_run/run_config.json`.
 
 The exact same configuration was then frozen and run once on all 125 NFBS subjects. NFBS was not used to choose thresholds, morphology radii, centrality weight, warning rules, or failure-category thresholds.
+
+For complete-volume evaluation, the 2D fractions were transferred directly to 3D dimensions and recorded in `configs/volume_default.yaml`; no NFBS result was used to search for better values. Each subject remained one independent evaluation unit. Bootstrap intervals and paired tests therefore resampled subjects, not voxels.
 
 ## Results
 
@@ -88,6 +94,22 @@ The central-component method still had the best mean overlap, but its mean Dice 
 
 ![NFBS failure categories](docs/assets/nfbs_external_failure_categories.png)
 
+## Complete 3D NFBS evaluation
+
+| Method | N | Dice mean (median) | IoU mean | Precision | Sensitivity | Specificity | Surface Dice | HD95 (mm) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `otsu_threshold` | 125 | 0.526 (0.527) | 0.359 | 0.399 | **0.778** | 0.865 | 0.114 | 79.43 |
+| `otsu_morphology` | 125 | **0.559 (0.565)** | **0.391** | **0.445** | 0.757 | 0.891 | **0.141** | **77.86** |
+| `central_component` | 125 | 0.556 (0.565) | 0.390 | 0.443 | 0.753 | **0.891** | 0.141 | 77.90 |
+
+![Complete 3D NFBS method comparison](docs/assets/nfbs_3d_method_comparison.png)
+
+Morphology improved mean Dice over Otsu by 0.0334 (95% paired bootstrap CI 0.0306–0.0360), with 121 wins and four losses. Its mean Dice 95% interval was 0.5461–0.5719. The central-component step tied morphology on 124 subjects and harmed one, producing a mean difference of -0.0030 (95% CI -0.0089–0.0000; Holm-adjusted p=1.0). The complete-volume winner is therefore `otsu_morphology`.
+
+![Complete 3D NFBS Dice distribution](docs/assets/nfbs_3d_dice_distribution.png)
+
+The absolute result remains weak. Morphology averaged 0.445 precision and 0.757 sensitivity, consistent with keeping large amounts of scalp, face, and neck tissue. The retrospective taxonomy classified 124 morphology predictions as over-segmentation and one as boundary mismatch. Full 3D context alone did not solve the anatomical ambiguity of intensity thresholding.
+
 ## Successful cases
 
 ![Best cases](outputs/full_run/best_cases.png)
@@ -108,9 +130,11 @@ These cases show why the later methods help: morphology removes fragments, while
 
 These failures explain why the later method is not uniformly better. Selecting one component helps when non-brain clutter is separate, but hurts when thresholding fragments the actual brain or a wrong central structure looks most plausible.
 
+The complete 3D review reaches the same conclusion from whole volumes. The best morphology cases were `A00057786` (Dice 0.706), `A00054019` (0.701), and `A00054441` (0.684). Even these were categorized as over-segmentation. The worst were `A00060006` (0.267), `A00063368` (0.372), and `A00051539` (0.387), where scalp, face, and neck survived the threshold. On `A00063368`, component selection discarded the morphology result and produced zero overlap, showing that a plausible central-component heuristic can make a complete-volume prediction worse.
+
 ## Interpretation
 
-The internal experiment supports a narrow conclusion: on the SynthStrip 2D test split, deterministic cleanup and component selection improve average overlap over raw Otsu. The NFBS result adds a stronger conclusion: the absolute performance does not transfer reliably to a different T1 acquisition and field of view. It does not show that thresholding is clinically adequate.
+The internal experiment supports a narrow conclusion: on the SynthStrip 2D test split, deterministic cleanup and component selection improve average overlap over raw Otsu. The NFBS results add a stronger conclusion: the absolute performance does not transfer reliably to a different T1 acquisition and field of view. Processing the entire 3D volume modestly improves the cleanup baseline relative to the constructed 2D NFBS slice, but mean Dice remains only 0.559 and component selection is not beneficial. None of these results shows that thresholding is clinically adequate.
 
 Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799, Infant 0.714, and FSM 0.700 mean Dice. It also varies by modality encoded in the identifiers: ASL/EPI 0.952, MRA 0.947, DWI 0.912, FLAIR 0.904, T2 0.775, PD 0.757, T1 0.755, and qT1 0.514. MRI contrast, resolution, anatomy, and acquisition differences challenge a single intensity rule.
 
@@ -120,17 +144,17 @@ Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799
 
 ## Limitations
 
-- One sagittal slice per scan cannot measure 3D continuity or volumetric accuracy.
+- The main SynthStrip benchmark contains only one sagittal slice per scan. Complete-volume evidence comes from one external T1 dataset.
 - Only 24 scans informed parameter choice.
 - The heuristic encodes assumptions about intensity, size, connectivity, and location.
 - Warning thresholds were calibrated on only 24 development scans. They remain geometry heuristics rather than confidence probabilities and miss some poor predictions.
-- Millimeter boundary distances depend on NIfTI header spacing and measure only a 2D contour, not a complete 3D surface.
+- Millimeter boundary distances depend on NIfTI header spacing. The SynthStrip and constructed NFBS results measure 2D contours; the full NFBS experiment measures 3D surfaces.
 - Results may not transfer to another scanner, protocol, population, or mask definition.
-- NFBS evaluates a deterministic 2D center slice derived from each 3D volume. It is external data, but it is not a full-volume experiment and its slice construction differs from SynthStrip's published 2D archive.
+- The constructed NFBS slice experiment differs from SynthStrip's published 2D slice construction. The complete NFBS experiment avoids that limitation but strongly over-segments adjacent anatomy.
 - Timing is specific to the local Apple-silicon software environment.
 - This is not a prospective, clinical, diagnostic, or regulatory evaluation.
 
 ## Proposed next experiment
 
-Train a small 2D U-Net with a leakage-safe training/development/test design and compare it with these unchanged baselines. Keep NFBS untouched as external evaluation. The specific question is whether learned spatial features reduce the observed NFBS under-segmentation and wrong-component failures—not merely whether a model has more parameters. A later experiment should process complete 3D volumes and measure volumetric continuity.
+First test stronger classical priors—bias-field correction, deterministic head/neck cropping, atlas initialization, or watershed/graph-cut refinement—against the unchanged 3D baselines. A later small U-Net should use a leakage-safe subject-level training/development/test design and an external dataset reserved before model selection. The specific question is whether learned spatial features reduce observed scalp/neck over-segmentation without increasing missed brain tissue, not merely whether a model has more parameters.
 

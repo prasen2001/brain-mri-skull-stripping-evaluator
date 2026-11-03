@@ -1,0 +1,17 @@
+normalization:
+  lower_percentile: 1.0
+  upper_percentile: 99.0
+
+# These values are transferred from the frozen 2D configuration by applying
+# the same fractions to 3D dimensions. They were not tuned on NFBS results.
+morphology:
+  opening_radius_fraction: 0.008
+  closing_radius_fraction: 0.004
+  minimum_component_volume_fraction: 0.005
+
+central_component:
+  centrality_weight: 0.75
+
+evaluation:
+  boundary_tolerance_voxels: 1.0
+  bootstrap_samples: 1000

@@ -2,13 +2,13 @@
 
 An educational, beginner-friendly research prototype that asks a simple question:
 
-> How far can understandable classical image-processing methods go when separating brain tissue from non-brain pixels in varied 2D medical images?
+> How far can understandable classical image-processing methods go when separating brain tissue from non-brain pixels and voxels?
 
-This project evaluates three fixed baselines on the official SynthStrip 2D v1.5 dataset. It does **not** use deep learning, train a model, or provide medical advice.
+This project evaluates three fixed baselines on the official SynthStrip 2D v1.5 dataset, then tests the same ideas on complete 3D NFBS volumes. It does **not** use deep learning, train a model, or provide medical advice.
 
 ## What the project does
 
-For each 2D image, the program loads its reference brain mask, robustly normalizes image intensity, runs three methods, measures their predictions, and writes tables and figures:
+For each image or volume, the program loads its reference brain mask, robustly normalizes intensity, runs three methods, measures their predictions, and writes tables and figures:
 
 1. `otsu_threshold`: one automatically selected threshold, with deterministic polarity handling.
 2. `otsu_morphology`: Otsu plus opening, closing, hole filling, and small-object removal.
@@ -16,7 +16,7 @@ For each 2D image, the program loads its reference brain mask, robustly normaliz
 
 The implementation is separated into dataset loading, preprocessing, segmentation, metrics, evaluation, and visualization modules. There is no notebook-only logic and no hidden metrics library.
 
-The evaluator also calculates boundary metrics in pixels and physical millimeters, stratifies results by source dataset and MRI modality, performs paired scan-level comparisons, produces deterministic bootstrap confidence intervals, and applies reference-free geometry checks that flag suspicious masks for manual review.
+The primary evaluator calculates boundary metrics in pixels and physical millimeters, stratifies 2D results by source dataset and MRI modality, performs paired scan-level comparisons, produces deterministic bootstrap confidence intervals, and applies reference-free geometry checks that flag suspicious masks for manual review. A separate 3D CLI applies the same stable method names to complete NFBS volumes with 3D structuring elements, 26-connected components, and full-surface distance metrics.
 
 ## Why skull stripping matters
 
@@ -148,7 +148,7 @@ data/processed/synthstrip_data_v1.5_2d
 python -m pytest -q
 ```
 
-Verified result: `49 passed`.
+Verified result: `61 passed`.
 
 For the complete development checks used in this repository:
 
@@ -159,7 +159,7 @@ mypy src
 python -m pytest -q --cov=src --cov-report=term-missing
 ```
 
-The verified branch coverage was 80.6%, above the enforced 75% project floor. The suite includes a subprocess CLI integration test, complete visualization/report rendering, external-data preparation, and invalid-input cases.
+The verified branch coverage was 83.6%, above the enforced 75% project floor. The suite includes subprocess and in-process CLI integration tests, complete visualization/report rendering, external-data preparation, and invalid-input cases.
 
 ## Reproduce development tuning
 
@@ -216,6 +216,19 @@ python -m src.evaluate \
 ```
 
 The SynthStrip-tuned parameters are frozen for this run. Do not tune them on NFBS and continue calling the result external validation.
+
+### Complete 3D NFBS evaluation
+
+The extraction step above also preserves the original full volumes under `data/raw/nfbs_extracted/NFBS_Dataset`. This verified command evaluates all 125 complete volumes:
+
+```bash
+python -m src.evaluate_3d \
+  --data-dir data/raw/nfbs_extracted/NFBS_Dataset \
+  --output-dir outputs/nfbs_3d_full \
+  --seed 42
+```
+
+For a quick smoke test, add `--limit 3 --bootstrap-samples 100` and use a different output directory. The values in `configs/volume_default.yaml` are direct 3D interpretations of the frozen 2D fractions; they were not selected after inspecting NFBS results.
 
 ## Optional local Streamlit explorer
 
@@ -280,6 +293,8 @@ Every case figure shows the normalized MRI, ground truth, prediction, contour ov
 Generated data and outputs are intentionally ignored by Git; rerun the commands to reproduce them.
 
 Selected aggregate charts are tracked in `docs/assets/` so they render on GitHub without publishing dataset images.
+
+The 3D CLI writes `per_volume_metrics.csv`, `summary_metrics.csv`, bootstrap and paired-comparison tables, a failure-category summary, `run_config.json`, two aggregate charts, and six local orthogonal review figures. The review figures remain ignored because they display individual public MRI volumes.
 
 ## Measured held-out results
 
@@ -355,6 +370,24 @@ The central-component mean Dice dropped from 0.7903 on SynthStrip to 0.5368 on N
 
 ![NFBS external failure categories](docs/assets/nfbs_external_failure_categories.png)
 
+## Complete 3D NFBS results
+
+These are real measurements from the verified full-volume run on all **125 NFBS subjects**. The same normalization and morphology fractions were transferred without tuning on NFBS. Unlike the preceding constructed 2D experiment, each prediction uses the complete 3D image and is evaluated against the complete 3D mask.
+
+| Method | Mean Dice | Median Dice | Mean IoU | Precision | Sensitivity | Specificity | Surface Dice | HD95 (mm) | Mean time/volume |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `otsu_threshold` | 0.5255 | 0.5272 | 0.3587 | 0.3985 | **0.7780** | 0.8647 | 0.1141 | 79.43 | 0.090 s |
+| `otsu_morphology` | **0.5589** | **0.5645** | **0.3913** | **0.4452** | 0.7573 | 0.8911 | **0.1414** | **77.86** | 1.130 s |
+| `central_component` | 0.5559 | **0.5645** | 0.3895 | 0.4429 | 0.7531 | **0.8911** | 0.1412 | 77.90 | 2.104 s |
+
+![Complete 3D NFBS method comparison](docs/assets/nfbs_3d_method_comparison.png)
+
+Morphology improved mean Dice over raw Otsu by 0.0334 (paired 95% bootstrap CI 0.0306–0.0360) and won on 121 of 125 volumes. The connected-component step did not improve on morphology: it tied on 124 volumes and changed one case from Dice 0.372 to 0.000, so its mean was 0.0030 lower. This is why `otsu_morphology`, not the nominally more complex third method, is the measured 3D winner.
+
+![Complete 3D NFBS Dice distribution](docs/assets/nfbs_3d_dice_distribution.png)
+
+All methods still performed poorly in absolute terms. Morphology's mean precision was only 0.445 while sensitivity was 0.757, and 124 of 125 predictions were retrospectively categorized as over-segmentation. Orthogonal reviews show scalp, face, and neck tissue surviving the intensity rule. Using a full volume gives more spatial context, but it does not make thresholding understand anatomy.
+
 ## Failure analysis
 
 Successful cases such as `ixi_mra_138` (Dice 0.989), `asl_epi_124` (0.983), and `ixi_mra_013` (0.979) contain a dominant connected brain region with strong separation from background. Morphology removes small fragments and the central-component rule discards peripheral anatomy.
@@ -369,14 +402,14 @@ The source-level central-component mean Dice also varied: ASL 0.851, QIN 0.852, 
 
 ## Limitations
 
-- The dataset contains one 2D sagittal slice per scan, not full 3D volumes; 2D results do not establish 3D performance.
+- The primary SynthStrip experiment contains one 2D sagittal slice per scan. The separate NFBS experiment measures complete 3D volumes, but only for one external T1 dataset.
 - Otsu assumes two separable intensity groups, while MRI anatomy and artifacts are multi-modal and spatially complex.
 - The centrality heuristic can select the wrong anatomy when the brain is off-center or internal tissue is especially bright.
 - Ground-truth definitions can differ between datasets, especially around cerebrospinal fluid and boundaries.
 - Development tuning used only 24 scans. Test metrics describe this dataset and split, not every scanner, population, disease, or protocol.
-- NFBS adds one independent T1 acquisition, but both evaluations use only one 2D sagittal slice per scan. NFBS slice selection is deterministic and mask-independent, yet it does not reproduce the original SynthStrip slice-selection procedure.
+- The constructed 2D NFBS experiment selects one deterministic, mask-independent center slice and does not reproduce SynthStrip's original slice-selection procedure. The complete 3D NFBS experiment avoids slice selection but still has severe over-segmentation.
 - Quality-warning thresholds are geometry heuristics calibrated on only 24 development scans, not confidence estimates. Some poor masks are not flagged and unusual valid masks can be flagged.
-- Physical boundary distances use NIfTI header spacing, but they remain 2D slice measurements and do not describe a 3D anatomical surface.
+- Physical boundary distances use NIfTI header spacing. SynthStrip and constructed NFBS values describe 2D contours; the complete-volume NFBS values describe 3D surfaces.
 - Timing is machine- and software-dependent.
 - This is a retrospective educational evaluation, not clinical validation.
 
@@ -386,12 +419,13 @@ This software is an educational research prototype. It is **not** diagnostic sof
 
 ## Future work
 
-The external result makes the next question concrete: determine whether a small 2D U-Net trained with a strict scan-level training/development/test protocol can reduce NFBS under-segmentation and wrong-component failures while preserving the untouched NFBS evaluation. Additional work should evaluate complete 3D volumes rather than isolated slices. An autoencoder, pretrained encoder, transformer, or regression model should be introduced only with a clear question and leakage-safe evaluation—not because it sounds more advanced.
+The complete-volume result makes the next question concrete: determine whether stronger classical spatial priors or a small U-Net trained with a strict scan-level training/development/test protocol can separate brain from adjacent scalp and neck tissue. NFBS has now been inspected as external evaluation, so a future learned experiment should either pre-register how it will be used as a final test or reserve another untouched dataset. Bias-field correction, head/neck cropping, atlas-guided initialization, and watershed or graph-cut refinement are reasonable classical experiments before deep learning. An autoencoder, pretrained encoder, transformer, or regression model should be introduced only with a clear question and leakage-safe evaluation—not because it sounds more advanced.
 
 ## Project map
 
 ```text
 configs/default.yaml               tuned classical parameters
+configs/volume_default.yaml        frozen complete-volume parameters
 scripts/download_data.py           official download, checksum, safe extraction
 scripts/prepare_nfbs_external.py   safe NFBS download and 2D preparation
 scripts/tune_on_development.py      development-only grid search
@@ -405,8 +439,12 @@ src/calibration.py                  warning-calibration measurements
 src/failure_analysis.py             retrospective outcome taxonomy
 src/evaluate.py                     command-line evaluation
 src/visualization.py                charts and five-panel cases
+src/volume_dataset.py               complete NFBS volume discovery and validation
+src/volume_segmentation.py          three deterministic 3D baselines
+src/evaluate_3d.py                  complete-volume NFBS CLI
+src/volume_visualization.py         3D aggregate and orthogonal review figures
 streamlit_app.py                    optional public-dataset explorer
-tests/                              49 unit, integration, rendering, and app tests
+tests/                              61 unit, integration, rendering, and app tests
 docs/assets/                        tracked aggregate result charts
 INTERVIEW_PREP.md                   beginner study guide
 PROJECT_REPORT.md                   concise experimental report

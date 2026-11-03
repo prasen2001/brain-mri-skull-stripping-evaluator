@@ -10,7 +10,7 @@ Magnetic resonance imaging uses magnetic fields and radio-frequency signals to p
 
 ### What is a pixel? What is a voxel?
 
-A pixel is one location in a 2D image and stores a value, such as intensity. A voxel is the 3D equivalent: a small volume element. This project uses 2D sagittal slices, so it processes pixels, although the source scans were 3D.
+A pixel is one location in a 2D image and stores a value, such as intensity. A voxel is the 3D equivalent: a small volume element. This project first evaluates 2D sagittal slices, then evaluates all voxels in complete 3D NFBS volumes.
 
 ### What is segmentation?
 
@@ -93,11 +93,11 @@ A U-Net can learn multi-scale spatial patterns and boundaries from labeled examp
 
 ### Why is this not a clinical product?
 
-It is a retrospective educational prototype tested on 2D slices from two public datasets. External NFBS performance was poor, it has catastrophic failure cases, and there is no prospective clinical validation, regulatory review, workflow integration, or evidence for every population and scanner.
+It is a retrospective educational prototype tested on public 2D slices and one public complete-volume T1 dataset. External NFBS performance was poor, it has catastrophic failure cases, and there is no prospective clinical validation, regulatory review, workflow integration, or evidence for every population and scanner.
 
 ## 60-second explanation
 
-“I built a reproducible evaluation of three classical skull-stripping baselines. On 558 held-out SynthStrip slices, mean Dice improved from 0.749 for Otsu to 0.772 with morphology and 0.790 with central-component selection. I then froze every parameter and evaluated 125 canonical center slices from the independent NFBS dataset. The best mean Dice fell to 0.537, with several zero-overlap cases. A retrospective taxonomy showed under-segmentation, boundary mismatch, and wrong-component selection. My main lesson is that simple spatial cleanup improves an internal baseline, but external validation exposes how poorly intensity heuristics generalize.”
+“I built a reproducible evaluation of three classical skull-stripping baselines. On 558 held-out SynthStrip slices, mean Dice improved from 0.749 for Otsu to 0.772 with morphology and 0.790 with central-component selection. I froze the choices and evaluated both center slices and complete 3D volumes from 125 independent NFBS subjects. On full volumes, morphology was best at only 0.559 mean Dice; component selection added no benefit and caused one zero-overlap case. The masks mostly over-segmented scalp and neck tissue. My main lesson is that a more complex heuristic is not automatically better, and full 3D context does not make intensity thresholding understand anatomy.”
 
 ## Two-minute detailed explanation
 
@@ -109,7 +109,9 @@ It is a retrospective educational prototype tested on 2D slices from two public 
 
 “Because the methods process the same scans, I also calculated paired improvements rather than comparing only separate means. Method 3 improved over raw Otsu by 0.041 Dice on average and won on 456 of 558 SynthStrip scans. I generated source- and modality-specific statistics, physical boundary plots, a ranked review report, and a reference-based failure taxonomy.
 
-“For external validation, I used the open NFBS repository of 125 defaced T1 volumes. I selected each canonical center sagittal slice using image geometry, never the mask, and kept all SynthStrip-tuned settings frozen. Method 3 still ranked first, but mean Dice dropped from 0.790 to 0.537. That result is more scientifically useful than hiding the failure: it demonstrates domain shift and motivates a leakage-safe learned model. I would not claim clinical adequacy.”
+“For external validation, I used the open NFBS repository of 125 defaced T1 volumes. I first selected each canonical center sagittal slice using image geometry, never the mask, and kept all SynthStrip-tuned settings frozen. Method 3 ranked first there, but mean Dice dropped from 0.790 to 0.537.
+
+“I then built a true 3D path with canonical affine checks, spherical morphology, 26-connected components, physical surface distances, and subject-level bootstrap comparisons. I transferred the scale fractions without tuning on NFBS. Morphology won with mean Dice 0.559 and improved over Otsu by 0.033, but precision was only 0.445 and 124 of 125 masks were categorized as over-segmented. Component selection tied morphology on 124 subjects and failed catastrophically on one. That negative result is useful: more spatial context and a nominally stronger heuristic did not solve the anatomy problem. I would not claim clinical adequacy.”
 
 ## Twelve likely interview questions
 
@@ -120,13 +122,13 @@ It is a retrospective educational prototype tested on 2D slices from two public 
    MRI intensities do not have a universal scale. Per-image percentile normalization reduces scale differences and limits outliers. Its downside is that it can hide absolute cross-scan intensity information, but these methods do not rely on that information.
 
 3. **How did you prevent test leakage?**  
-   I used the dataset authors' scan-level split. I tried morphology settings only on 24 development scans, fixed the configuration, and then ran the 558 test scans.
+   I used the dataset authors' scan-level split. I tried morphology settings only on 24 development scans, fixed the configuration, and then ran the 558 SynthStrip test scans. I transferred the scale fractions into 3D without tuning on NFBS and kept each NFBS subject as one evaluation unit.
 
 4. **Why not use accuracy?**  
    Background often dominates. A nearly all-background prediction could look accurate while missing the brain. I report it only as a secondary field and emphasize Dice, IoU, precision, sensitivity, and specificity.
 
 5. **Which method won and why?**  
-   `central_component` had the best mean Dice on both datasets: 0.790 on SynthStrip and 0.537 on NFBS. It often removed peripheral false-positive components, but external performance was still poor and it sometimes selected entirely wrong anatomy.
+   It depends on the experiment. `central_component` won the 2D SynthStrip test at 0.790 mean Dice and the constructed NFBS slice test at 0.537. On complete NFBS volumes, `otsu_morphology` won at 0.559; component selection tied it on 124 subjects and made one subject worse. I would report the experiment-specific result rather than claiming one method is universally strongest.
 
 6. **What surprised you?**  
    The severe T2 failures. One case had precision 1.0 but sensitivity 0.045: the small region it predicted was correct, yet it missed almost the entire brain. That made the value of multiple metrics very concrete.
@@ -135,13 +137,13 @@ It is a retrospective educational prototype tested on 2D slices from two public 
    Method 3's Dice standard deviation was 0.156, so performance varied widely. Mean performance alone is not enough; case plots and minimum values reveal risk.
 
 8. **What would you improve first?**  
-   External validation is now complete and revealed a large generalization gap. I would next establish a leakage-safe training and development split for a small U-Net, while preserving NFBS as untouched external evaluation, then add complete 3D evaluation.
+   Complete 3D evaluation is now implemented and shows dominant scalp/neck over-segmentation. I would first test deterministic head/neck cropping or an atlas-guided spatial prior, then compare a small U-Net using a pre-registered subject-level split and a newly reserved external dataset.
 
 9. **Did you implement the SynthStrip neural model?**  
    No. I used its public 2D evaluation dataset and masks. This version deliberately implements only classical baselines. The original SynthStrip method is deep learning and is cited as the data source.
 
 10. **What do you still not know?**  
-    I have demonstrated poor transfer to one external T1 dataset, not generalization across all acquisitions. I still have not demonstrated 3D performance, clinical usefulness, or prospective validity. I would seek expert guidance on clinical mask definitions and evaluation design.
+    I have measured 3D performance on one external T1 dataset, not generalization across acquisitions, diseases, scanners, or annotation protocols. I have not demonstrated clinical usefulness or prospective validity. I would seek expert guidance on brain-boundary definitions and evaluation design.
 
 11. **Are the quality warnings confidence scores?**
     No. They are deterministic geometry and method-disagreement rules. Their thresholds were selected on only 24 development scans, and their observed test behavior is reported honestly. They are not calibrated probabilities and need external validation.
@@ -196,7 +198,7 @@ It is a retrospective educational prototype tested on 2D slices from two public 
 - Do not say 0.790 Dice is “good enough” without context; the minimum was 0.085.
 - Do not say you trained SynthStrip or implemented its neural network.
 - Do not say thresholding understands anatomy.
-- Do not generalize beyond the evaluated SynthStrip and NFBS 2D constructions, scanners, or populations.
+- Do not generalize beyond the evaluated SynthStrip slices and NFBS 2D/3D constructions, scanners, or populations.
 - Do not claim deep-learning expertise from this classical project.
 - Do not hide the T2 failures or quote only the best cases.
 - Do not call warning flags calibrated confidence or proof that an unflagged mask is correct.
@@ -211,11 +213,13 @@ It is a retrospective educational prototype tested on 2D slices from two public 
 - Open `docs/assets/paired_dice_improvement.png` and explain why comparisons are paired.
 - Open `docs/assets/modality_dice_comparison.png` and discuss qT1/T2 limitations.
 - Open `docs/assets/nfbs_external_method_comparison.png` and explain the 0.790-to-0.537 generalization drop.
+- Open `docs/assets/nfbs_3d_method_comparison.png` and explain why morphology, not component selection, won the full-volume run.
+- Open `outputs/nfbs_3d_full/orthogonal_reviews/worst_1_A00060006.png` and identify scalp/neck false positives.
 - Open `docs/assets/quality_warning_rates.png` and explain that warnings are conservative.
 - Open one best and one worst overlay; explain TP, FP, and FN.
 - Show `summary_metrics.csv` and emphasize 558 held-out scans.
 - Explain development tuning versus final testing.
-- State the best method and one reason it improves.
+- State the best method for each experiment and why the answer changes in 3D.
 - State the worst-case Dice and one reason it fails.
 - End with the clinical disclaimer and the next U-Net experiment.
 
