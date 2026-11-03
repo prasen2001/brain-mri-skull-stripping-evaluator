@@ -58,12 +58,12 @@ def compute_binary_metrics(
 
 
 def _surface(mask: np.ndarray) -> np.ndarray:
-    """Return one-pixel-wide inner boundary pixels for a binary mask."""
+    """Return a one-grid-cell-wide inner boundary for a 2D or 3D mask."""
     binary = np.asarray(mask, dtype=bool)
     if not binary.any():
         return np.zeros(binary.shape, dtype=bool)
     eroded = ndi.binary_erosion(
-        binary, structure=np.ones((3, 3), dtype=bool), border_value=0
+        binary, structure=np.ones((3,) * binary.ndim, dtype=bool), border_value=0
     )
     return binary & ~eroded
 
@@ -72,7 +72,7 @@ def compute_boundary_metrics(
     prediction: np.ndarray,
     reference: np.ndarray,
     tolerance_pixels: float = 1.0,
-    spacing_mm: tuple[float, float] = (1.0, 1.0),
+    spacing_mm: tuple[float, ...] = (1.0, 1.0),
 ) -> dict[str, float]:
     """Compute surface Dice, robust Hausdorff distance, and ASSD.
 
@@ -81,7 +81,8 @@ def compute_boundary_metrics(
     symmetric boundary distances, making it less sensitive than maximum
     Hausdorff distance to one extreme pixel. ASSD is the average symmetric
     surface distance. Pixel distances support image-array debugging; physical
-    distances use NIfTI row/column spacing and are reported in millimeters.
+    distances use NIfTI axis spacing and are reported in millimeters. The same
+    implementation supports 2D pixels and 3D voxels.
 
     Two empty masks are a perfect boundary match. When exactly one mask is
     empty, overlap is zero and both distance metrics receive the image diagonal
@@ -94,10 +95,12 @@ def compute_boundary_metrics(
         )
     if tolerance_pixels < 0:
         raise ValueError("tolerance_pixels must be non-negative.")
-    if len(spacing_mm) != 2 or any(
+    if len(spacing_mm) != prediction.ndim or any(
         not np.isfinite(value) or value <= 0 for value in spacing_mm
     ):
-        raise ValueError("spacing_mm must contain two positive finite values.")
+        raise ValueError(
+            "spacing_mm must contain one positive finite value per array axis."
+        )
 
     pred_surface = _surface(np.asarray(prediction, dtype=bool))
     ref_surface = _surface(np.asarray(reference, dtype=bool))
@@ -112,12 +115,9 @@ def compute_boundary_metrics(
             "assd_mm": 0.0,
         }
     if pred_count == 0 or ref_count == 0:
-        diagonal_pixels = float(np.hypot(*prediction.shape))
+        diagonal_pixels = float(np.linalg.norm(np.asarray(prediction.shape)))
         diagonal_mm = float(
-            np.hypot(
-                prediction.shape[0] * spacing_mm[0],
-                prediction.shape[1] * spacing_mm[1],
-            )
+            np.linalg.norm(np.asarray(prediction.shape) * np.asarray(spacing_mm))
         )
         return {
             "surface_dice": 0.0,
@@ -132,15 +132,18 @@ def compute_boundary_metrics(
     pred_to_ref = distance_to_ref[pred_surface]
     ref_to_pred = distance_to_pred[ref_surface]
     symmetric_distances = np.concatenate((pred_to_ref, ref_to_pred))
-    distance_to_ref_mm = ndi.distance_transform_edt(
-        ~ref_surface, sampling=spacing_mm
-    )
-    distance_to_pred_mm = ndi.distance_transform_edt(
-        ~pred_surface, sampling=spacing_mm
-    )
-    symmetric_distances_mm = np.concatenate(
-        (distance_to_ref_mm[pred_surface], distance_to_pred_mm[ref_surface])
-    )
+    if np.allclose(spacing_mm, 1.0):
+        symmetric_distances_mm = symmetric_distances
+    else:
+        distance_to_ref_mm = ndi.distance_transform_edt(
+            ~ref_surface, sampling=spacing_mm
+        )
+        distance_to_pred_mm = ndi.distance_transform_edt(
+            ~pred_surface, sampling=spacing_mm
+        )
+        symmetric_distances_mm = np.concatenate(
+            (distance_to_ref_mm[pred_surface], distance_to_pred_mm[ref_surface])
+        )
     within_tolerance = int(np.count_nonzero(pred_to_ref <= tolerance_pixels))
     within_tolerance += int(np.count_nonzero(ref_to_pred <= tolerance_pixels))
     return {

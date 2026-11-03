@@ -16,8 +16,8 @@ def robust_normalize(
     images return zeros because they contain no intensity contrast to segment.
     Non-finite values are replaced safely before percentile calculation.
     """
-    if image.ndim != 2:
-        raise ValueError(f"Expected a 2D image, received shape {image.shape}.")
+    if image.ndim not in {2, 3}:
+        raise ValueError(f"Expected a 2D image or 3D volume, received shape {image.shape}.")
     if not 0 <= lower_percentile < upper_percentile <= 100:
         raise ValueError("Percentiles must satisfy 0 <= lower < upper <= 100.")
 

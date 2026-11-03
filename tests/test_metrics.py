@@ -118,3 +118,19 @@ def test_boundary_metrics_for_empty_masks() -> None:
     assert result["hd95_pixels"] == 5.0
     assert result["assd_pixels"] == 5.0
 
+
+def test_boundary_metrics_support_3d_voxels_and_spacing() -> None:
+    prediction = np.zeros((8, 9, 10), dtype=bool)
+    reference = np.zeros_like(prediction)
+    prediction[2:6, 2:7, 2:8] = True
+    reference[3:7, 2:7, 2:8] = True
+    result = compute_boundary_metrics(
+        prediction,
+        reference,
+        tolerance_pixels=0,
+        spacing_mm=(2.0, 1.0, 1.0),
+    )
+    assert 0 < result["surface_dice"] < 1
+    assert result["hd95_pixels"] == 1.0
+    assert result["hd95_mm"] == 2.0
+
