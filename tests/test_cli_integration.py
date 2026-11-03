@@ -66,7 +66,10 @@ def test_complete_cli_on_synthetic_nifti_dataset(tmp_path: Path) -> None:
         "paired_method_comparisons.csv",
         "quality_summary.csv",
         "failure_review.md",
+        "failure_analysis.csv",
+        "failure_category_summary.csv",
         "method_comparison.png",
+        "failure_category_distribution.png",
         "modality_dice_comparison.png",
         "paired_dice_improvement.png",
     )
@@ -74,6 +77,11 @@ def test_complete_cli_on_synthetic_nifti_dataset(tmp_path: Path) -> None:
         assert (output_dir / filename).is_file(), filename
     metrics = pd.read_csv(output_dir / "per_image_metrics.csv")
     assert len(metrics) == len(identifiers) * 3
-    assert {"hd95_mm", "assd_mm", "modality", "quality_warnings"} <= set(
-        metrics.columns
-    )
+    assert {
+        "hd95_mm",
+        "assd_mm",
+        "modality",
+        "quality_warnings",
+        "primary_failure_category",
+        "failure_reasons",
+    } <= set(metrics.columns)

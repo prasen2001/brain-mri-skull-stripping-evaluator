@@ -8,6 +8,7 @@ import json
 import platform
 import random
 import time
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,11 @@ import yaml
 from scipy import stats
 
 from src.dataset import discover_pairs, load_pair_with_spacing, validate_pairs
+from src.failure_analysis import (
+    DEFAULT_FAILURE_CONFIG,
+    categorize_failures,
+    summarize_failure_categories,
+)
 from src.metrics import compute_binary_metrics, compute_boundary_metrics
 from src.preprocessing import robust_normalize
 from src.quality import QualityConfig, mean_method_disagreement, prediction_diagnostics
@@ -454,7 +460,28 @@ def run(args: argparse.Namespace) -> None:
     metrics = pd.DataFrame.from_records(records)
     if metrics.empty:
         raise RuntimeError("Every candidate pair failed during evaluation.")
+    metrics = categorize_failures(metrics)
     metrics.to_csv(args.output_dir / "per_image_metrics.csv", index=False)
+    failure_columns = [
+        "identifier",
+        "subset",
+        "method",
+        "dice",
+        "precision",
+        "sensitivity",
+        "surface_dice",
+        "outcome_severity",
+        "primary_failure_category",
+        "failure_reasons",
+        "complement_prediction_dice",
+    ]
+    metrics[failure_columns].to_csv(
+        args.output_dir / "failure_analysis.csv", index=False
+    )
+    failure_summary = summarize_failure_categories(metrics)
+    failure_summary.to_csv(
+        args.output_dir / "failure_category_summary.csv", index=False
+    )
     summary = _summarize(metrics)
     summary.to_csv(args.output_dir / "summary_metrics.csv", index=False)
     source_summary = _summarize_grouped(metrics, ["dataset_source", "method"])
@@ -497,6 +524,7 @@ def run(args: argparse.Namespace) -> None:
         "methods": list(METHOD_NAMES),
         "best_method_by_mean_dice": best_method,
         "effective_parameters": effective_config,
+        "failure_analysis_thresholds": asdict(DEFAULT_FAILURE_CONFIG),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "package_versions": _package_versions(),

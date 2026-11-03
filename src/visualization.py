@@ -212,6 +212,35 @@ def plot_boundary_metric_comparison(metrics: pd.DataFrame, output_dir: Path) -> 
     _save_figure(figure, output_dir / "boundary_metric_comparison.png")
 
 
+def plot_failure_categories(metrics: pd.DataFrame, output_dir: Path) -> None:
+    """Plot mutually exclusive retrospective outcome categories by method."""
+    counts = (
+        metrics.groupby(["method", "primary_failure_category"], sort=False)
+        .size()
+        .rename("n_images")
+        .reset_index()
+    )
+    totals = counts.groupby("method")["n_images"].transform("sum")
+    counts["percentage"] = 100 * counts["n_images"] / totals
+    figure, axis = plt.subplots(figsize=(13, 7))
+    sns.barplot(
+        data=counts,
+        y="primary_failure_category",
+        x="percentage",
+        hue="method",
+        errorbar=None,
+        ax=axis,
+    )
+    axis.set(
+        title="Retrospective outcome categories (reference mask required)",
+        xlabel="Images within method (%)",
+        ylabel="Primary category",
+    )
+    axis.legend(title="Method", bbox_to_anchor=(1.02, 1), loc="upper left")
+    axis.grid(axis="x", alpha=0.25)
+    _save_figure(figure, output_dir / "failure_category_distribution.png")
+
+
 def _error_categories(prediction: np.ndarray, reference: np.ndarray) -> np.ndarray:
     categories = np.zeros(prediction.shape, dtype=np.uint8)
     categories[prediction & reference] = 1
@@ -351,8 +380,8 @@ def create_failure_review(
         "Ground-truth metrics are shown afterward for retrospective audit and do not "
         "influence the warning rules.",
         "",
-        "| Rank | Identifier | Warnings | Disagreement | Area | Dice | Surface Dice | HD95 (mm) |",
-        "|---:|---|---|---:|---:|---:|---:|---:|",
+        "| Rank | Identifier | Retrospective category | Warnings | Dice | Surface Dice | HD95 (mm) |",
+        "|---:|---|---|---|---:|---:|---:|",
     ]
     normalize = lambda image: robust_normalize(  # noqa: E731
         image, lower_percentile, upper_percentile
@@ -405,6 +434,8 @@ def create_failure_review(
             "\n".join(
                 (
                     f"Warnings: {row['quality_warnings']}",
+                    f"Outcome category: {row['primary_failure_category']}",
+                    f"All outcome reasons: {row['failure_reasons']}",
                     f"Disagreement: {row['method_disagreement']:.3f}",
                     f"Predicted area: {row['predicted_area_fraction']:.3f}",
                     f"Components: {int(row['component_count'])}",
@@ -422,8 +453,8 @@ def create_failure_review(
         filename = f"{rank:02d}_{identifier}.png"
         _save_figure(figure, review_dir / filename)
         markdown.append(
-            f"| {rank} | `{identifier}` | {row['quality_warnings']} | "
-            f"{row['method_disagreement']:.3f} | {row['predicted_area_fraction']:.3f} | "
+            f"| {rank} | `{identifier}` | {row['primary_failure_category']} | "
+            f"{row['quality_warnings']} | "
             f"{row['dice']:.3f} | {row['surface_dice']:.3f} | {row['hd95_mm']:.2f} |"
         )
         markdown.extend(("", f"![Review case {rank}](failure_review_cases/{filename})", ""))
@@ -452,6 +483,7 @@ def create_all_visualizations(
     plot_paired_dice_improvements(metrics, output_dir)
     plot_quality_warning_rates(metrics, output_dir)
     plot_boundary_metric_comparison(metrics, output_dir)
+    plot_failure_categories(metrics, output_dir)
     best_method = create_case_visualizations(
         metrics,
         pairs,
