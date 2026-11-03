@@ -272,12 +272,15 @@ def _holm_adjust(p_values: list[float]) -> list[float]:
 
 
 def _paired_method_comparisons(
-    metrics: pd.DataFrame, sample_count: int, seed: int
+    metrics: pd.DataFrame,
+    sample_count: int,
+    seed: int,
+    method_names: tuple[str, ...] = METHOD_NAMES,
 ) -> pd.DataFrame:
     """Compare methods on the same scans using paired bootstrap differences."""
     rows: list[dict[str, Any]] = []
-    for baseline_index, baseline_method in enumerate(METHOD_NAMES[:-1]):
-        for comparison_method in METHOD_NAMES[baseline_index + 1 :]:
+    for baseline_index, baseline_method in enumerate(method_names[:-1]):
+        for comparison_method in method_names[baseline_index + 1 :]:
             baseline = metrics[metrics["method"] == baseline_method].set_index(
                 "identifier"
             )

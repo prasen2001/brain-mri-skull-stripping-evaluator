@@ -322,7 +322,9 @@ def run(args: argparse.Namespace) -> None:
     confidence.to_csv(
         args.output_dir / "bootstrap_confidence_intervals.csv", index=False
     )
-    paired = _paired_method_comparisons(metrics, bootstrap_samples, args.seed)
+    paired = _paired_method_comparisons(
+        metrics, bootstrap_samples, args.seed, reported_methods
+    )
     paired.to_csv(args.output_dir / "paired_method_comparisons.csv", index=False)
     failure_summary = summarize_failure_categories(metrics)
     failure_summary.to_csv(
