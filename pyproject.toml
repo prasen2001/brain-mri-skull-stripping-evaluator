@@ -57,6 +57,6 @@ branch = true
 source = ["src"]
 
 [tool.coverage.report]
-fail_under = 55
+fail_under = 75
 show_missing = true
 

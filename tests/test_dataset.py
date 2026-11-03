@@ -74,3 +74,33 @@ def test_load_pair_reports_pixel_spacing(tmp_path: Path) -> None:
     _, _, spacing = load_pair_with_spacing(pairs[0])
     assert spacing == (2.0, 0.5)
 
+
+def test_true_3d_input_is_rejected_in_2d_pipeline(tmp_path: Path) -> None:
+    _make_pair(tmp_path, "volume", shape=(4, 5, 6))
+    pairs, _ = discover_pairs(tmp_path, "all")
+    with pytest.raises(ValueError, match="not 2D"):
+        load_pair(pairs[0])
+
+
+def test_image_without_any_finite_value_is_rejected(tmp_path: Path) -> None:
+    image = np.full((4, 5, 1), np.nan, dtype=np.float32)
+    mask = np.zeros((4, 5, 1), dtype=np.uint8)
+    _save_nifti(tmp_path / "nonfinite" / "image.nii.gz", image)
+    _save_nifti(tmp_path / "nonfinite" / "mask.nii.gz", mask)
+    pairs, _ = discover_pairs(tmp_path, "all")
+    with pytest.raises(ValueError, match="no finite values"):
+        load_pair(pairs[0])
+
+
+def test_unknown_official_identifier_is_reported(tmp_path: Path) -> None:
+    _make_pair(tmp_path, "unlisted")
+    (tmp_path / "scans_test.txt").write_text("another_scan\n", encoding="utf-8")
+    pairs, invalid = discover_pairs(tmp_path, "all")
+    assert pairs == []
+    assert invalid == [
+        {
+            "identifier": "unlisted",
+            "reason": "Identifier is absent from official split files",
+        }
+    ]
+
