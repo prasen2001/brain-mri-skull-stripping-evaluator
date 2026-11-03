@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This experiment tests whether the fixed classical baselines transfer beyond the dataset used for parameter selection. It is deliberately reported separately from SynthStrip.
+These experiments test whether the fixed classical baselines transfer beyond the dataset used for parameter selection. A constructed center-slice analysis and a complete-volume analysis are deliberately reported separately from SynthStrip.
 
 ## Dataset
 
@@ -20,9 +20,10 @@ The Neurofeedback Skull-stripped (NFBS) repository contains 125 defaced, anonymi
 3. The center index of the sagittal image axis was selected using image geometry only.
 4. The reference mask was sliced at the same index but never used to select the slice.
 5. No setting was changed after inspecting NFBS results.
-6. NFBS outputs remain separate from SynthStrip outputs.
+6. The complete-volume configuration transfers the same scale fractions into 3D and was not tuned on NFBS.
+7. NFBS outputs remain separate from SynthStrip outputs.
 
-This is still a constructed 2D external experiment. It does not evaluate complete 3D volumes, and the slice-selection procedure may differ from the one used to create the official SynthStrip 2D archive.
+The center-slice result is a constructed 2D external experiment whose slice-selection procedure may differ from the official SynthStrip archive. The separate complete-volume result has no slice-selection step.
 
 ## Reproduction
 
@@ -34,9 +35,14 @@ python -m src.evaluate \
   --output-dir outputs/nfbs_external_run \
   --subset test \
   --seed 42
+
+python -m src.evaluate_3d \
+  --data-dir data/raw/nfbs_extracted/NFBS_Dataset \
+  --output-dir outputs/nfbs_3d_full \
+  --seed 42
 ```
 
-## Results
+## Constructed 2D results
 
 | Method | N | Mean Dice | Median Dice | Mean IoU | Precision | Sensitivity | HD95 (mm) |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -46,7 +52,19 @@ python -m src.evaluate \
 
 The central-component method improved mean Dice over raw Otsu by 0.0312. Its paired 95% bootstrap interval was 0.0014–0.0602. However, its absolute mean Dice was 0.2535 lower than on SynthStrip, and its range was 0.000–0.888.
 
-## Failure analysis
+## Complete 3D results
+
+| Method | N | Mean Dice | Median Dice | Mean IoU | Precision | Sensitivity | Surface Dice | HD95 (mm) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `otsu_threshold` | 125 | 0.5255 | 0.5272 | 0.3587 | 0.3985 | **0.7780** | 0.1141 | 79.43 |
+| `otsu_morphology` | 125 | **0.5589** | **0.5645** | **0.3913** | **0.4452** | 0.7573 | **0.1414** | **77.86** |
+| `central_component` | 125 | 0.5559 | **0.5645** | 0.3895 | 0.4429 | 0.7531 | 0.1412 | 77.90 |
+
+Morphology improved mean Dice over Otsu by 0.0334 (paired 95% bootstrap CI 0.0306–0.0360) and won on 121 subjects. Component selection tied morphology on 124 subjects and caused one zero-overlap result, so it did not improve the 3D baseline. Morphology is the measured full-volume winner.
+
+![Complete 3D method comparison](docs/assets/nfbs_3d_method_comparison.png)
+
+## Constructed 2D failure analysis
 
 For `central_component`:
 
@@ -60,8 +78,12 @@ For `central_component`:
 
 No NFBS result met the strict acceptable category. Representative failures show scalp, neck, or peripheral bright tissue becoming a more plausible connected component than the brain. This is a limitation of intensity grouping and simple centrality—not an implementation result to hide.
 
+## Complete 3D failure analysis
+
+For `otsu_morphology`, 124 of 125 predictions were categorized as over-segmentation and one as boundary mismatch. The best subjects were `A00057786` (Dice 0.706), `A00054019` (0.701), and `A00054441` (0.684); even these retained excess non-brain tissue. The worst were `A00060006` (0.267), `A00063368` (0.372), and `A00051539` (0.387). Orthogonal review figures show the threshold retaining scalp, face, and neck tissue. Component selection made `A00063368` a zero-overlap prediction.
+
 ## Interpretation
 
-The ordering of the baselines transfers: morphology and central-component selection improve the average. Their absolute accuracy does not. One external T1 dataset cannot establish universal failure, but it is enough to reject the claim that the SynthStrip score generalizes automatically.
+In the constructed 2D result, morphology and central-component selection improve the average. In complete 3D, morphology improves on Otsu but component selection adds no benefit. Their absolute accuracy remains poor: the 3D morphology result combines 0.445 precision with 0.757 sensitivity, and 124 of 125 masks are categorized as over-segmentation. One external T1 dataset cannot establish universal failure, but it is enough to reject the claim that the SynthStrip score generalizes automatically or that full-volume thresholding solves the problem.
 
-The next experiment should preserve NFBS as untouched external evaluation and ask whether a learned spatial model reduces these specific failure modes. This remains educational research, not clinical validation.
+The next experiment should pre-register a subject-level split and reserve an untouched external dataset before selecting a learned spatial model. This remains educational research, not clinical validation.

@@ -7,6 +7,9 @@ All notable project changes are documented here. The project has not yet publish
 ### Added
 
 - Reproducible external evaluation on 125 NFBS subjects.
+- Complete 3D NFBS loader, canonical affine/spacing validation, and full-volume evaluator.
+- Spherical 3D morphology, 26-connected component selection, and physical 3D surface metrics.
+- Complete-volume aggregate charts and orthogonal best/worst review figures.
 - Deterministic retrospective failure-mode taxonomy and summary chart.
 - Physical-space HD95 and ASSD from NIfTI spacing.
 - Paired bootstrap intervals, Wilcoxon tests, and Holm correction.
@@ -18,10 +21,11 @@ All notable project changes are documented here. The project has not yet publish
 
 ### Changed
 
-- Documentation now distinguishes internal SynthStrip results, prediction-only warnings, retrospective error categories, and external NFBS measurements.
+- Documentation now distinguishes internal SynthStrip results, prediction-only warnings, retrospective error categories, constructed 2D NFBS measurements, and complete 3D NFBS measurements.
 
 ### Known limitations
 
-- Evaluation is based on one 2D sagittal slice per scan rather than complete 3D volumes.
+- SynthStrip evaluation is based on one 2D sagittal slice per scan; complete 3D evidence is limited to one external T1 dataset.
 - Frozen classical parameters reach only 0.5368 mean Dice on external NFBS slices.
+- Transferred 3D morphology reaches only 0.5589 mean Dice on complete NFBS volumes and strongly over-segments scalp/neck tissue.
 - The software is an educational prototype and is not clinically validated.
