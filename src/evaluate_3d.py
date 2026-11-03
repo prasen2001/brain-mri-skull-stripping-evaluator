@@ -54,6 +54,15 @@ def _parser() -> argparse.ArgumentParser:
             "been inspected, so this is a second-look analysis, not fresh validation."
         ),
     )
+    parser.add_argument(
+        "--reuse-baseline-metrics",
+        type=Path,
+        default=None,
+        help=(
+            "Reuse a verified three-method per_volume_metrics.csv and compute "
+            "only the spatial prior. Requires --include-spatial-prior."
+        ),
+    )
     return parser
 
 
@@ -148,10 +157,62 @@ def _load_config(
     )
 
 
+def _load_reused_baselines(path: Path, identifiers: set[str]) -> pd.DataFrame:
+    """Load and validate complete baseline rows for the requested subjects."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Baseline metrics file does not exist: {path}")
+    metrics = pd.read_csv(path)
+    required = {
+        "identifier",
+        "method",
+        "tp",
+        "tn",
+        "fp",
+        "fn",
+        "dice",
+        "iou",
+        "precision",
+        "sensitivity",
+        "specificity",
+        "surface_dice",
+        "hd95_mm",
+        "assd_mm",
+        "quality_warnings",
+        "processing_time_seconds",
+    }
+    missing = required - set(metrics.columns)
+    if missing:
+        raise ValueError(f"Baseline metrics are missing columns: {sorted(missing)}")
+    metrics["identifier"] = metrics["identifier"].astype(str)
+    metrics["method"] = metrics["method"].astype(str)
+    selected = metrics[metrics["identifier"].isin(identifiers)].copy()
+    observed_identifiers = set(selected["identifier"])
+    if observed_identifiers != identifiers:
+        missing_ids = sorted(identifiers - observed_identifiers)
+        raise ValueError(f"Baseline metrics are missing identifiers: {missing_ids}")
+    if selected.duplicated(["identifier", "method"]).any():
+        raise ValueError("Baseline metrics contain duplicate identifier-method rows.")
+    expected_methods = set(METHOD_NAMES)
+    observed_methods = set(selected["method"])
+    if observed_methods != expected_methods:
+        raise ValueError(
+            "Baseline metrics must contain exactly the original methods: "
+            f"{sorted(expected_methods)}; found {sorted(observed_methods)}."
+        )
+    counts = selected.groupby("identifier")["method"].nunique()
+    if not counts.eq(len(METHOD_NAMES)).all():
+        raise ValueError("Each reused subject must contain all original methods.")
+    return selected
+
+
 def run(args: argparse.Namespace) -> None:
     """Evaluate full volumes, write measurements, and render review figures."""
     if args.limit is not None and args.limit <= 0:
         raise ValueError("--limit must be a positive integer.")
+    if args.reuse_baseline_metrics is not None and not args.include_spatial_prior:
+        raise ValueError(
+            "--reuse-baseline-metrics requires --include-spatial-prior."
+        )
     random.seed(args.seed)
     np.random.seed(args.seed)
     (
@@ -176,7 +237,21 @@ def run(args: argparse.Namespace) -> None:
     if not pairs:
         raise RuntimeError("No candidate NFBS volume pairs were found.")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    methods = VOLUME_METHOD_NAMES if args.include_spatial_prior else METHOD_NAMES
+    reported_methods = (
+        VOLUME_METHOD_NAMES if args.include_spatial_prior else METHOD_NAMES
+    )
+    methods_to_run = (
+        (VOLUME_METHOD_NAMES[-1],)
+        if args.reuse_baseline_metrics is not None
+        else reported_methods
+    )
+    reused_baselines = (
+        _load_reused_baselines(
+            args.reuse_baseline_metrics, {pair.identifier for pair in pairs}
+        )
+        if args.reuse_baseline_metrics is not None
+        else None
+    )
 
     records: list[dict[str, Any]] = []
     evaluated = []
@@ -187,7 +262,7 @@ def run(args: argparse.Namespace) -> None:
             predictions: dict[str, np.ndarray] = {}
             thresholds: dict[str, float] = {}
             timings: dict[str, float] = {}
-            for method in methods:
+            for method in methods_to_run:
                 started = time.perf_counter()
                 prediction, threshold = segment_volume(
                     normalized, method, config, spacing, spatial_config
@@ -196,7 +271,7 @@ def run(args: argparse.Namespace) -> None:
                 predictions[method] = prediction
                 thresholds[method] = threshold
 
-            for method in methods:
+            for method in methods_to_run:
                 prediction = predictions[method]
                 overlap = compute_binary_metrics(prediction, reference)
                 boundary = compute_boundary_metrics(
@@ -228,9 +303,17 @@ def run(args: argparse.Namespace) -> None:
         if index == 1 or index % 5 == 0 or index == len(pairs):
             print(f"Processed {index}/{len(pairs)} candidate volumes", flush=True)
 
-    metrics = pd.DataFrame.from_records(records)
-    if metrics.empty:
+    new_metrics = pd.DataFrame.from_records(records)
+    if new_metrics.empty:
         raise RuntimeError("Every candidate NFBS volume failed during evaluation.")
+    if reused_baselines is not None:
+        evaluated_ids = {pair.identifier for pair in evaluated}
+        reused = reused_baselines[
+            reused_baselines["identifier"].isin(evaluated_ids)
+        ].copy()
+        metrics = pd.concat((reused, new_metrics), ignore_index=True, sort=False)
+    else:
+        metrics = new_metrics
     metrics = categorize_failures(metrics)
     metrics.to_csv(args.output_dir / "per_volume_metrics.csv", index=False)
     summary = _summarize(metrics)
@@ -272,11 +355,16 @@ def run(args: argparse.Namespace) -> None:
         "n_discovered": len(pairs),
         "n_evaluated": len(evaluated),
         "n_invalid": len(invalid),
-        "methods": list(methods),
+        "methods": list(reported_methods),
         "best_method_by_mean_dice": best_method,
         "effective_parameters": effective,
         "parameters_tuned_on_nfbs": False,
         "nfbs_previously_inspected": bool(args.include_spatial_prior),
+        "reused_baseline_metrics": (
+            str(args.reuse_baseline_metrics)
+            if args.reuse_baseline_metrics is not None
+            else None
+        ),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "package_versions": _package_versions(),
