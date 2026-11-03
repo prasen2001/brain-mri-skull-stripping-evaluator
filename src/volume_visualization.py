@@ -17,7 +17,11 @@ from matplotlib.patches import Patch
 
 from src.preprocessing import robust_normalize
 from src.volume_dataset import VolumePair, load_volume_pair
-from src.volume_segmentation import VolumeMorphologyConfig, segment_volume
+from src.volume_segmentation import (
+    SpatialPriorConfig,
+    VolumeMorphologyConfig,
+    segment_volume,
+)
 
 
 def _save(figure: plt.Figure, path: Path) -> None:
@@ -85,13 +89,16 @@ def create_orthogonal_review(
     dice: float,
     output_path: Path,
     config: VolumeMorphologyConfig,
+    spatial_config: SpatialPriorConfig,
     lower_percentile: float,
     upper_percentile: float,
 ) -> None:
     """Render center sagittal, coronal, and axial views with labeled errors."""
-    image, reference, _ = load_volume_pair(pair)
+    image, reference, spacing = load_volume_pair(pair)
     normalized = robust_normalize(image, lower_percentile, upper_percentile)
-    prediction, _ = segment_volume(normalized, method, config)
+    prediction, _ = segment_volume(
+        normalized, method, config, spacing, spatial_config
+    )
     errors = _error_map(prediction, reference)
     orientations = ((0, "Sagittal"), (1, "Coronal"), (2, "Axial"))
     figure, axes = plt.subplots(3, 3, figsize=(13, 13))
@@ -141,6 +148,7 @@ def create_volume_visualizations(
     pairs: dict[str, VolumePair],
     output_dir: Path,
     config: VolumeMorphologyConfig,
+    spatial_config: SpatialPriorConfig,
     lower_percentile: float,
     upper_percentile: float,
 ) -> str:
@@ -167,6 +175,7 @@ def create_volume_visualizations(
                 float(row["dice"]),
                 review_dir / f"{group}_{rank}_{identifier}.png",
                 config,
+                spatial_config,
                 lower_percentile,
                 upper_percentile,
             )

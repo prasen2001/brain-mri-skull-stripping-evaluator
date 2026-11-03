@@ -27,7 +27,12 @@ from src.metrics import compute_binary_metrics, compute_boundary_metrics
 from src.preprocessing import robust_normalize
 from src.segmentation import METHOD_NAMES
 from src.volume_dataset import discover_nfbs_volumes, load_volume_pair
-from src.volume_segmentation import VolumeMorphologyConfig, segment_volume
+from src.volume_segmentation import (
+    VOLUME_METHOD_NAMES,
+    SpatialPriorConfig,
+    VolumeMorphologyConfig,
+    segment_volume,
+)
 from src.volume_visualization import create_volume_visualizations
 
 
@@ -41,18 +46,44 @@ def _parser() -> argparse.ArgumentParser:
         "--config", type=Path, default=Path("configs/volume_default.yaml")
     )
     parser.add_argument("--bootstrap-samples", type=int, default=None)
+    parser.add_argument(
+        "--include-spatial-prior",
+        action="store_true",
+        help=(
+            "Include the optional exploratory fourth method. NFBS has already "
+            "been inspected, so this is a second-look analysis, not fresh validation."
+        ),
+    )
     return parser
+
+
+def _triple(
+    value: object, name: str, default: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    candidate = default if value is None else value
+    if not isinstance(candidate, (list, tuple)) or len(candidate) != 3:
+        raise ValueError(f"{name} must contain exactly three numeric values.")
+    return (float(candidate[0]), float(candidate[1]), float(candidate[2]))
 
 
 def _load_config(
     path: Path, bootstrap_override: int | None
-) -> tuple[VolumeMorphologyConfig, float, float, float, int, dict[str, Any]]:
+) -> tuple[
+    VolumeMorphologyConfig,
+    SpatialPriorConfig,
+    float,
+    float,
+    float,
+    int,
+    dict[str, Any],
+]:
     if not path.is_file():
         raise FileNotFoundError(f"3D configuration file does not exist: {path}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     normalization = raw.get("normalization", {})
     morphology = raw.get("morphology", {})
     central = raw.get("central_component", {})
+    spatial = raw.get("spatial_prior", {})
     evaluation = raw.get("evaluation", {})
     lower = float(normalization.get("lower_percentile", 1.0))
     upper = float(normalization.get("upper_percentile", 99.0))
@@ -68,6 +99,26 @@ def _load_config(
         ),
         centrality_weight=float(central.get("centrality_weight", 0.75)),
     )
+    spatial_config = SpatialPriorConfig(
+        center_fraction=_triple(
+            spatial.get("center_fraction"),
+            "spatial_prior.center_fraction",
+            (0.50, 0.46, 0.61),
+        ),
+        radius_fraction=_triple(
+            spatial.get("radius_fraction"),
+            "spatial_prior.radius_fraction",
+            (0.39, 0.42, 0.34),
+        ),
+        inferior_exclusion_fraction=float(
+            spatial.get("inferior_exclusion_fraction", 0.25)
+        ),
+        opening_radius_mm=float(spatial.get("opening_radius_mm", 1.0)),
+        closing_radius_mm=float(spatial.get("closing_radius_mm", 2.0)),
+        minimum_component_volume_ml=float(
+            spatial.get("minimum_component_volume_ml", 1.0)
+        ),
+    )
     tolerance = float(evaluation.get("boundary_tolerance_voxels", 1.0))
     bootstrap_samples = int(
         bootstrap_override
@@ -80,12 +131,21 @@ def _load_config(
             "upper_percentile": upper,
         },
         "morphology": asdict(config),
+        "spatial_prior": asdict(spatial_config),
         "evaluation": {
             "boundary_tolerance_voxels": tolerance,
             "bootstrap_samples": bootstrap_samples,
         },
     }
-    return config, lower, upper, tolerance, bootstrap_samples, effective
+    return (
+        config,
+        spatial_config,
+        lower,
+        upper,
+        tolerance,
+        bootstrap_samples,
+        effective,
+    )
 
 
 def run(args: argparse.Namespace) -> None:
@@ -94,9 +154,15 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("--limit must be a positive integer.")
     random.seed(args.seed)
     np.random.seed(args.seed)
-    config, lower, upper, tolerance, bootstrap_samples, effective = _load_config(
-        args.config, args.bootstrap_samples
-    )
+    (
+        config,
+        spatial_config,
+        lower,
+        upper,
+        tolerance,
+        bootstrap_samples,
+        effective,
+    ) = _load_config(args.config, args.bootstrap_samples)
     if tolerance < 0:
         raise ValueError("boundary tolerance must be non-negative.")
     if bootstrap_samples <= 0:
@@ -110,6 +176,7 @@ def run(args: argparse.Namespace) -> None:
     if not pairs:
         raise RuntimeError("No candidate NFBS volume pairs were found.")
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    methods = VOLUME_METHOD_NAMES if args.include_spatial_prior else METHOD_NAMES
 
     records: list[dict[str, Any]] = []
     evaluated = []
@@ -120,14 +187,16 @@ def run(args: argparse.Namespace) -> None:
             predictions: dict[str, np.ndarray] = {}
             thresholds: dict[str, float] = {}
             timings: dict[str, float] = {}
-            for method in METHOD_NAMES:
+            for method in methods:
                 started = time.perf_counter()
-                prediction, threshold = segment_volume(normalized, method, config)
+                prediction, threshold = segment_volume(
+                    normalized, method, config, spacing, spatial_config
+                )
                 timings[method] = time.perf_counter() - started
                 predictions[method] = prediction
                 thresholds[method] = threshold
 
-            for method in METHOD_NAMES:
+            for method in methods:
                 prediction = predictions[method]
                 overlap = compute_binary_metrics(prediction, reference)
                 boundary = compute_boundary_metrics(
@@ -181,11 +250,21 @@ def run(args: argparse.Namespace) -> None:
 
     pair_map = {pair.identifier: pair for pair in evaluated}
     best_method = create_volume_visualizations(
-        metrics, pair_map, args.output_dir, config, lower, upper
+        metrics,
+        pair_map,
+        args.output_dir,
+        config,
+        spatial_config,
+        lower,
+        upper,
     )
     run_config = {
         "created_utc": datetime.now(UTC).isoformat(),
-        "experiment": "complete_3d_nfbs_external_evaluation",
+        "experiment": (
+            "exploratory_3d_nfbs_spatial_prior_second_look"
+            if args.include_spatial_prior
+            else "complete_3d_nfbs_external_evaluation"
+        ),
         "data_dir": str(args.data_dir),
         "output_dir": str(args.output_dir),
         "seed": args.seed,
@@ -193,10 +272,11 @@ def run(args: argparse.Namespace) -> None:
         "n_discovered": len(pairs),
         "n_evaluated": len(evaluated),
         "n_invalid": len(invalid),
-        "methods": list(METHOD_NAMES),
+        "methods": list(methods),
         "best_method_by_mean_dice": best_method,
         "effective_parameters": effective,
         "parameters_tuned_on_nfbs": False,
+        "nfbs_previously_inspected": bool(args.include_spatial_prior),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "package_versions": _package_versions(),

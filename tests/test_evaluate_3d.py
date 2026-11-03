@@ -98,16 +98,23 @@ def test_complete_3d_run_is_covered_in_process(tmp_path: Path) -> None:
             "42",
             "--bootstrap-samples",
             "10",
+            "--include-spatial-prior",
         ]
     )
 
     run(arguments)
 
     metrics = pd.read_csv(output_dir / "per_volume_metrics.csv")
-    assert len(metrics) == 3
+    assert len(metrics) == 4
     assert set(metrics["method"]) == {
         "otsu_threshold",
         "otsu_morphology",
         "central_component",
+        "spatial_prior",
     }
+    run_config = json.loads((output_dir / "run_config.json").read_text())
+    assert run_config["nfbs_previously_inspected"] is True
+    assert run_config["experiment"] == (
+        "exploratory_3d_nfbs_spatial_prior_second_look"
+    )
     assert (output_dir / "method_comparison_3d.png").is_file()
