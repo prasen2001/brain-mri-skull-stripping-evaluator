@@ -10,6 +10,8 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 
+from src.evaluate_3d import _parser, run
+
 
 def _save_subject(root: Path, identifier: str, offset: int) -> None:
     image = np.zeros((28, 30, 32), dtype=np.float32)
@@ -79,3 +81,33 @@ def test_complete_3d_cli_on_synthetic_volumes(tmp_path: Path) -> None:
     expected_best_method = metrics.groupby("method")["dice"].mean().idxmax()
     assert run_config["best_method_by_mean_dice"] == expected_best_method
     assert len(list((output_dir / "orthogonal_reviews").glob("*.png"))) == 6
+
+
+def test_complete_3d_run_is_covered_in_process(tmp_path: Path) -> None:
+    """Exercise orchestration directly so the coverage gate includes the 3D CLI."""
+    data_dir = tmp_path / "volumes"
+    _save_subject(data_dir, "A0001", 0)
+    output_dir = tmp_path / "results"
+    arguments = _parser().parse_args(
+        [
+            "--data-dir",
+            str(data_dir),
+            "--output-dir",
+            str(output_dir),
+            "--seed",
+            "42",
+            "--bootstrap-samples",
+            "10",
+        ]
+    )
+
+    run(arguments)
+
+    metrics = pd.read_csv(output_dir / "per_volume_metrics.csv")
+    assert len(metrics) == 3
+    assert set(metrics["method"]) == {
+        "otsu_threshold",
+        "otsu_morphology",
+        "central_component",
+    }
+    assert (output_dir / "method_comparison_3d.png").is_file()
