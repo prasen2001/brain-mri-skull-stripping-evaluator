@@ -12,6 +12,17 @@ morphology:
 central_component:
   centrality_weight: 0.75
 
+# Optional exploratory fourth method. Coordinates assume closest-canonical RAS:
+# left-right, posterior-anterior, inferior-superior. These values encode a
+# deliberately coarse brain-location hypothesis and were not grid-searched.
+spatial_prior:
+  center_fraction: [0.50, 0.46, 0.61]
+  radius_fraction: [0.39, 0.42, 0.34]
+  inferior_exclusion_fraction: 0.25
+  opening_radius_mm: 1.0
+  closing_radius_mm: 2.0
+  minimum_component_volume_ml: 1.0
+
 evaluation:
   boundary_tolerance_voxels: 1.0
   bootstrap_samples: 1000

@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import numpy as np
 
+from src.metrics import compute_binary_metrics
 from src.preprocessing import robust_normalize
 from src.volume_segmentation import (
+    SPATIAL_PRIOR,
+    SpatialPriorConfig,
     VolumeMorphologyConfig,
     central_component_volume,
     clean_volume_with_morphology,
+    ellipsoidal_footprint,
     otsu_threshold_volume,
+    segment_volume,
     select_largest_central_volume_component,
+    spatial_prior_mask,
 )
 
 
@@ -61,3 +67,49 @@ def test_volume_polarity_handles_dark_center() -> None:
     prediction, _ = otsu_threshold_volume(volume)
     assert prediction[16, 16, 16]
     assert not prediction[0, 0, 0]
+
+
+def test_physical_footprint_respects_anisotropic_spacing() -> None:
+    footprint = ellipsoidal_footprint(2.0, (1.0, 1.0, 2.0))
+    center = tuple(size // 2 for size in footprint.shape)
+    assert footprint.shape == (5, 5, 3)
+    assert footprint[center]
+    assert footprint[center[0] + 2, center[1], center[2]]
+    assert footprint[center[0], center[1], center[2] + 1]
+    assert not footprint[center[0] + 2, center[1], center[2] + 1]
+
+
+def test_spatial_prior_is_deterministic_and_excludes_inferior_volume() -> None:
+    config = SpatialPriorConfig(inferior_exclusion_fraction=0.25)
+    first = spatial_prior_mask((40, 50, 60), (1.0, 1.2, 2.0), config)
+    second = spatial_prior_mask((40, 50, 60), (1.0, 1.2, 2.0), config)
+    assert np.array_equal(first, second)
+    assert not first[:, :, :15].any()
+    assert first[20, 23, 37]
+    assert not first[0, 0, -1]
+
+
+def test_spatial_prior_reduces_synthetic_inferior_false_positives() -> None:
+    shape = (64, 64, 64)
+    coordinates = np.indices(shape)
+    reference = (
+        ((coordinates[0] - 32) / 15) ** 2
+        + ((coordinates[1] - 29) / 17) ** 2
+        + ((coordinates[2] - 40) / 15) ** 2
+        <= 1
+    )
+    neck = np.zeros(shape, dtype=bool)
+    neck[24:40, 22:42, 2:26] = True
+    volume = np.zeros(shape, dtype=np.float32)
+    volume[reference | neck] = 0.8
+
+    baseline, _ = segment_volume(volume, "otsu_morphology")
+    constrained, _ = segment_volume(
+        volume, SPATIAL_PRIOR, spacing_mm=(1.0, 1.0, 1.0)
+    )
+    baseline_metrics = compute_binary_metrics(baseline, reference)
+    constrained_metrics = compute_binary_metrics(constrained, reference)
+
+    assert constrained_metrics["fp"] < baseline_metrics["fp"]
+    assert constrained_metrics["dice"] > baseline_metrics["dice"]
+    assert constrained[32, 29, 40]

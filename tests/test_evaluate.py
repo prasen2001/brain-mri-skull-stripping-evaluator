@@ -111,3 +111,30 @@ def test_paired_distance_improvement_treats_lower_as_better() -> None:
     ].iloc[0]
     assert hd95["mean_improvement"] > 0
     assert hd95["comparison_wins"] == 2
+
+
+def test_paired_comparison_accepts_an_additional_method() -> None:
+    frame = _metrics_frame()
+    original = frame.copy()
+    original["method"] = original["method"].replace(
+        {"first": "otsu_threshold", "second": "otsu_morphology"}
+    )
+    spatial = frame[frame["method"] == "second"].copy()
+    spatial["method"] = "spatial_prior"
+    spatial["dice"] += 0.2
+    combined = pd.concat((original, spatial), ignore_index=True)
+
+    comparisons = _paired_method_comparisons(
+        combined,
+        50,
+        42,
+        ("otsu_threshold", "otsu_morphology", "spatial_prior"),
+    )
+
+    spatial_dice = comparisons[
+        (comparisons["baseline_method"] == "otsu_morphology")
+        & (comparisons["comparison_method"] == "spatial_prior")
+        & (comparisons["metric"] == "dice")
+    ].iloc[0]
+    assert spatial_dice["mean_improvement"] == pytest.approx(0.2)
+    assert spatial_dice["comparison_wins"] == 2

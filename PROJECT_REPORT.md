@@ -110,6 +110,23 @@ Morphology improved mean Dice over Otsu by 0.0334 (95% paired bootstrap CI 0.030
 
 The absolute result remains weak. Morphology averaged 0.445 precision and 0.757 sensitivity, consistent with keeping large amounts of scalp, face, and neck tissue. The retrospective taxonomy classified 124 morphology predictions as over-segmentation and one as boundary mismatch. Full 3D context alone did not solve the anatomical ambiguity of intensity thresholding.
 
+## Exploratory spatial-prior follow-up
+
+After the full-volume NFBS failures were inspected, an optional fourth method was added. `spatial_prior` intersects the unchanged morphology result with a configurable ellipsoid in closest-canonical RAS coordinates, removes the inferior neck region, and performs final morphology using millimetre radii and a millilitre component threshold. Because NFBS informed the problem choice, this is a second-look exploratory analysis rather than independent external validation.
+
+| Method | N | Dice mean (median) | IoU | Precision | Sensitivity | Specificity | Surface Dice | HD95 (mm) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `otsu_morphology` | 125 | 0.559 (0.565) | 0.391 | 0.445 | 0.757 | 0.891 | 0.141 | 77.86 |
+| `spatial_prior` | 125 | **0.754 (0.756)** | **0.608** | **0.724** | **0.795** | **0.966** | **0.216** | **21.94** |
+
+![Exploratory spatial-prior comparison](docs/assets/nfbs_3d_spatial_method_comparison.png)
+
+Spatial restriction improved Dice over morphology by 0.1948 (paired 95% bootstrap CI 0.1879–0.2018), winning on all 125 subjects. Mean Dice for the new method had a 95% bootstrap interval of 0.7437–0.7635. Mean ASSD fell from 19.01 mm to 7.62 mm.
+
+![Exploratory spatial-prior Dice distribution](docs/assets/nfbs_3d_spatial_dice_distribution.png)
+
+The improvement is substantial but incomplete. Dice ranged from 0.515 to 0.876. The retrospective categories were 46 boundary mismatches, 29 over-segmentations, 24 mixed errors, 21 acceptable cases, and five under-segmentations. These errors show the tradeoff of a fixed geometric prior: it removes peripheral false positives but can also clip real brain or preserve non-brain tissue within the ellipsoid.
+
 ## Successful cases
 
 ![Best cases](outputs/full_run/best_cases.png)
@@ -132,9 +149,11 @@ These failures explain why the later method is not uniformly better. Selecting o
 
 The complete 3D review reaches the same conclusion from whole volumes. The best morphology cases were `A00057786` (Dice 0.706), `A00054019` (0.701), and `A00054441` (0.684). Even these were categorized as over-segmentation. The worst were `A00060006` (0.267), `A00063368` (0.372), and `A00051539` (0.387), where scalp, face, and neck survived the threshold. On `A00063368`, component selection discarded the morphology result and produced zero overlap, showing that a plausible central-component heuristic can make a complete-volume prediction worse.
 
+For the exploratory spatial prior, the best cases were `A00054019` (Dice 0.876), `A00050940` (0.865), and `A00054441` (0.856). The worst were `A00060006` (0.515), `A00040623` (0.579), and `A00051539` (0.599). The worst review still shows both missed brain and retained scalp, demonstrating that the ellipsoid is a coarse restriction rather than anatomical understanding.
+
 ## Interpretation
 
-The internal experiment supports a narrow conclusion: on the SynthStrip 2D test split, deterministic cleanup and component selection improve average overlap over raw Otsu. The NFBS results add a stronger conclusion: the absolute performance does not transfer reliably to a different T1 acquisition and field of view. Processing the entire 3D volume modestly improves the cleanup baseline relative to the constructed 2D NFBS slice, but mean Dice remains only 0.559 and component selection is not beneficial. None of these results shows that thresholding is clinically adequate.
+The internal experiment supports a narrow conclusion: on the SynthStrip 2D test split, deterministic cleanup and component selection improve average overlap over raw Otsu. The initial NFBS results show that the absolute performance does not transfer reliably to a different T1 acquisition and field of view. Processing the entire 3D volume alone was insufficient. The exploratory follow-up supports a more specific hypothesis: much of the NFBS error came from anatomically implausible inferior and peripheral foreground. It does not establish how the fixed prior will transfer to new data. None of these results shows that thresholding is clinically adequate.
 
 Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799, Infant 0.714, and FSM 0.700 mean Dice. It also varies by modality encoded in the identifiers: ASL/EPI 0.952, MRA 0.947, DWI 0.912, FLAIR 0.904, T2 0.775, PD 0.757, T1 0.755, and qT1 0.514. MRI contrast, resolution, anatomy, and acquisition differences challenge a single intensity rule.
 
@@ -147,6 +166,7 @@ Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799
 - The main SynthStrip benchmark contains only one sagittal slice per scan. Complete-volume evidence comes from one external T1 dataset.
 - Only 24 scans informed parameter choice.
 - The heuristic encodes assumptions about intensity, size, connectivity, and location.
+- The exploratory spatial prior was motivated after NFBS inspection and assumes typical anatomy in closest-canonical coordinates. Its 0.754 Dice is not an unbiased external-validation estimate.
 - Warning thresholds were calibrated on only 24 development scans. They remain geometry heuristics rather than confidence probabilities and miss some poor predictions.
 - Millimeter boundary distances depend on NIfTI header spacing. The SynthStrip and constructed NFBS results measure 2D contours; the full NFBS experiment measures 3D surfaces.
 - Results may not transfer to another scanner, protocol, population, or mask definition.
@@ -156,5 +176,5 @@ Performance varies by source group for Method 3: ASL 0.851, QIN 0.852, IXI 0.799
 
 ## Proposed next experiment
 
-First test stronger classical priors—bias-field correction, deterministic head/neck cropping, atlas initialization, or watershed/graph-cut refinement—against the unchanged 3D baselines. A later small U-Net should use a leakage-safe subject-level training/development/test design and an external dataset reserved before model selection. The specific question is whether learned spatial features reduce observed scalp/neck over-segmentation without increasing missed brain tissue, not merely whether a model has more parameters.
+Reserve a new external dataset before changing the spatial method further. On declared development data, replace the fixed ellipsoid with adaptive head localization, bias-field correction, atlas initialization, or watershed/graph-cut refinement and perform an ablation of each operation. A later small U-Net should use a leakage-safe subject-level design and the untouched external dataset. The question is whether learned spatial features improve the remaining boundary errors without relying on an acquisition-specific geometric prior.
 

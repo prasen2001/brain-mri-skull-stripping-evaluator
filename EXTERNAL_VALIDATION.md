@@ -82,8 +82,21 @@ No NFBS result met the strict acceptable category. Representative failures show 
 
 For `otsu_morphology`, 124 of 125 predictions were categorized as over-segmentation and one as boundary mismatch. The best subjects were `A00057786` (Dice 0.706), `A00054019` (0.701), and `A00054441` (0.684); even these retained excess non-brain tissue. The worst were `A00060006` (0.267), `A00063368` (0.372), and `A00051539` (0.387). Orthogonal review figures show the threshold retaining scalp, face, and neck tissue. Component selection made `A00063368` a zero-overlap prediction.
 
+## Exploratory follow-up after NFBS inspection
+
+The initial NFBS results motivated a fourth method that constrains the morphology mask with a superior central ellipsoid and performs cleanup in physical units. Because this design responds to errors already seen on NFBS, its result is not part of the untouched external validation above.
+
+| Method | Mean Dice | Precision | Sensitivity | Surface Dice | HD95 (mm) |
+|---|---:|---:|---:|---:|---:|
+| `otsu_morphology` | 0.5589 | 0.4452 | 0.7573 | 0.1414 | 77.86 |
+| `spatial_prior` | **0.7537** | **0.7238** | **0.7947** | **0.2160** | **21.94** |
+
+The exploratory method improved Dice by 0.1948 (paired 95% bootstrap CI 0.1879–0.2018) and won on all 125 subjects. Its Dice range was 0.515–0.876, and only 21 cases met the strict acceptable category. This supports spatial restriction as a useful hypothesis while leaving transfer to a new dataset unanswered.
+
+![Exploratory spatial-prior comparison](docs/assets/nfbs_3d_spatial_method_comparison.png)
+
 ## Interpretation
 
 In the constructed 2D result, morphology and central-component selection improve the average. In complete 3D, morphology improves on Otsu but component selection adds no benefit. Their absolute accuracy remains poor: the 3D morphology result combines 0.445 precision with 0.757 sensitivity, and 124 of 125 masks are categorized as over-segmentation. One external T1 dataset cannot establish universal failure, but it is enough to reject the claim that the SynthStrip score generalizes automatically or that full-volume thresholding solves the problem.
 
-The next experiment should pre-register a subject-level split and reserve an untouched external dataset before selecting a learned spatial model. This remains educational research, not clinical validation.
+The next experiment should reserve an untouched external dataset before adapting the spatial prior or selecting a learned model. This remains educational research, not clinical validation.

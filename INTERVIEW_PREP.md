@@ -40,6 +40,10 @@ They edit binary shapes using a small neighborhood. Erosion shrinks foreground; 
 
 It is one group of touching foreground pixels. The third baseline prefers a large component near the image center. This often removes separate skull or artifact regions, but can choose the wrong central structure.
 
+### What is a spatial prior?
+
+A spatial prior is an assumption about where a target is likely to be. The optional 3D method assumes a typically positioned brain lies in a superior central ellipsoid after canonical orientation. This greatly reduced neck and peripheral false positives on NFBS, but it can fail when anatomy or field of view differs. It is a transparent heuristic, not anatomical understanding.
+
 ### What is ground truth?
 
 Ground truth is the reference mask used for evaluation. It is the best available target, not absolute truth: human definitions and annotation protocols can differ, especially at boundaries.
@@ -97,7 +101,7 @@ It is a retrospective educational prototype tested on public 2D slices and one p
 
 ## 60-second explanation
 
-“I built a reproducible evaluation of three classical skull-stripping baselines. On 558 held-out SynthStrip slices, mean Dice improved from 0.749 for Otsu to 0.772 with morphology and 0.790 with central-component selection. I froze the choices and evaluated both center slices and complete 3D volumes from 125 independent NFBS subjects. On full volumes, morphology was best at only 0.559 mean Dice; component selection added no benefit and caused one zero-overlap case. The masks mostly over-segmented scalp and neck tissue. My main lesson is that a more complex heuristic is not automatically better, and full 3D context does not make intensity thresholding understand anatomy.”
+“I built a reproducible evaluation of three classical skull-stripping baselines. On 558 held-out SynthStrip slices, mean Dice improved from 0.749 for Otsu to 0.790 with component selection. On complete NFBS volumes, the frozen morphology baseline reached only 0.559 and strongly over-segmented scalp and neck. I then added an explicitly exploratory fourth method: a coarse canonical spatial prior with millimetre-aware morphology. It reached 0.754 mean Dice and improved every NFBS subject over morphology, but NFBS had already motivated that design, so I do not call it fresh external validation. My main lesson is that spatial assumptions can solve a specific failure mode, but the next test must use untouched data.”
 
 ## Two-minute detailed explanation
 
@@ -112,6 +116,8 @@ It is a retrospective educational prototype tested on public 2D slices and one p
 “For external validation, I used the open NFBS repository of 125 defaced T1 volumes. I first selected each canonical center sagittal slice using image geometry, never the mask, and kept all SynthStrip-tuned settings frozen. Method 3 ranked first there, but mean Dice dropped from 0.790 to 0.537.
 
 “I then built a true 3D path with canonical affine checks, spherical morphology, 26-connected components, physical surface distances, and subject-level bootstrap comparisons. I transferred the scale fractions without tuning on NFBS. Morphology won with mean Dice 0.559 and improved over Otsu by 0.033, but precision was only 0.445 and 124 of 125 masks were categorized as over-segmented. Component selection tied morphology on 124 subjects and failed catastrophically on one. That negative result is useful: more spatial context and a nominally stronger heuristic did not solve the anatomy problem. I would not claim clinical adequacy.”
+
+“As a follow-up, I kept those three methods unchanged and added an optional `spatial_prior` method. It uses only canonical array geometry and voxel spacing: a superior ellipsoid removes implausible neck/peripheral regions, followed by opening and closing in millimetres. Mean Dice rose to 0.754, precision to 0.724, and HD95 fell from 77.86 to 21.94 mm. It beat morphology on all 125 subjects. However, this was designed after inspecting NFBS failures, so it is evidence that the hypothesis is promising—not an unbiased external performance estimate. The next evaluation needs a new untouched dataset.”
 
 ## Twelve likely interview questions
 
@@ -128,7 +134,7 @@ It is a retrospective educational prototype tested on public 2D slices and one p
    Background often dominates. A nearly all-background prediction could look accurate while missing the brain. I report it only as a secondary field and emphasize Dice, IoU, precision, sensitivity, and specificity.
 
 5. **Which method won and why?**  
-   It depends on the experiment. `central_component` won the 2D SynthStrip test at 0.790 mean Dice and the constructed NFBS slice test at 0.537. On complete NFBS volumes, `otsu_morphology` won at 0.559; component selection tied it on 124 subjects and made one subject worse. I would report the experiment-specific result rather than claiming one method is universally strongest.
+   It depends on the experiment. `central_component` won the original 2D SynthStrip test at 0.790. Among the three frozen methods, `otsu_morphology` won complete NFBS evaluation at 0.559. The later exploratory `spatial_prior` reached 0.754, but it was designed after NFBS inspection, so it needs untouched external confirmation.
 
 6. **What surprised you?**  
    The severe T2 failures. One case had precision 1.0 but sensitivity 0.045: the small region it predicted was correct, yet it missed almost the entire brain. That made the value of multiple metrics very concrete.
@@ -137,13 +143,13 @@ It is a retrospective educational prototype tested on public 2D slices and one p
    Method 3's Dice standard deviation was 0.156, so performance varied widely. Mean performance alone is not enough; case plots and minimum values reveal risk.
 
 8. **What would you improve first?**  
-   Complete 3D evaluation is now implemented and shows dominant scalp/neck over-segmentation. I would first test deterministic head/neck cropping or an atlas-guided spatial prior, then compare a small U-Net using a pre-registered subject-level split and a newly reserved external dataset.
+   I would reserve a new external dataset before changing parameters. On a declared development set, I would replace the fixed ellipsoid with adaptive head localization and test bias-field correction or watershed refinement. Then I would compare a small U-Net using the same subject-level protocol.
 
 9. **Did you implement the SynthStrip neural model?**  
    No. I used its public 2D evaluation dataset and masks. This version deliberately implements only classical baselines. The original SynthStrip method is deep learning and is cited as the data source.
 
 10. **What do you still not know?**  
-    I have measured 3D performance on one external T1 dataset, not generalization across acquisitions, diseases, scanners, or annotation protocols. I have not demonstrated clinical usefulness or prospective validity. I would seek expert guidance on brain-boundary definitions and evaluation design.
+    I do not know whether the spatial prior transfers beyond this already-inspected NFBS acquisition. I have not demonstrated generalization across diseases, scanners, orientations, ages, or annotation protocols, nor clinical usefulness or prospective validity.
 
 11. **Are the quality warnings confidence scores?**
     No. They are deterministic geometry and method-disagreement rules. Their thresholds were selected on only 24 development scans, and their observed test behavior is reported honestly. They are not calibrated probabilities and need external validation.
@@ -199,6 +205,7 @@ It is a retrospective educational prototype tested on public 2D slices and one p
 - Do not say you trained SynthStrip or implemented its neural network.
 - Do not say thresholding understands anatomy.
 - Do not generalize beyond the evaluated SynthStrip slices and NFBS 2D/3D constructions, scanners, or populations.
+- Do not present the spatial-prior result as untouched external validation; it was motivated by inspected NFBS failures.
 - Do not claim deep-learning expertise from this classical project.
 - Do not hide the T2 failures or quote only the best cases.
 - Do not call warning flags calibrated confidence or proof that an unflagged mask is correct.
@@ -214,6 +221,8 @@ It is a retrospective educational prototype tested on public 2D slices and one p
 - Open `docs/assets/modality_dice_comparison.png` and discuss qT1/T2 limitations.
 - Open `docs/assets/nfbs_external_method_comparison.png` and explain the 0.790-to-0.537 generalization drop.
 - Open `docs/assets/nfbs_3d_method_comparison.png` and explain why morphology, not component selection, won the full-volume run.
+- Open `docs/assets/nfbs_3d_spatial_method_comparison.png` and distinguish exploratory improvement from external validation.
+- In a spatial-prior review, identify the yellow dashed prior boundary and explain whether it clips brain or excludes non-brain anatomy.
 - Open `outputs/nfbs_3d_full/orthogonal_reviews/worst_1_A00060006.png` and identify scalp/neck false positives.
 - Open `docs/assets/quality_warning_rates.png` and explain that warnings are conservative.
 - Open one best and one worst overlay; explain TP, FP, and FN.

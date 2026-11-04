@@ -18,3 +18,8 @@ The two `nfbs_3d_*` figures summarize the verified complete-volume run on the
 same 125 subjects. They contain only aggregate measurements. Orthogonal MRI
 review figures remain under ignored `outputs/nfbs_3d_full/` paths and are not
 published in the repository.
+
+The two `nfbs_3d_spatial_*` figures summarize an exploratory follow-up performed
+after the baseline NFBS failures were inspected. They are tracked to document
+the measured hypothesis test, but they must not be described as untouched
+external validation.
