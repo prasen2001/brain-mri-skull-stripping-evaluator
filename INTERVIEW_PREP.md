@@ -222,6 +222,7 @@ It is a retrospective educational prototype tested on public 2D slices and one p
 - Open `docs/assets/nfbs_external_method_comparison.png` and explain the 0.790-to-0.537 generalization drop.
 - Open `docs/assets/nfbs_3d_method_comparison.png` and explain why morphology, not component selection, won the full-volume run.
 - Open `docs/assets/nfbs_3d_spatial_method_comparison.png` and distinguish exploratory improvement from external validation.
+- In a spatial-prior review, identify the yellow dashed prior boundary and explain whether it clips brain or excludes non-brain anatomy.
 - Open `outputs/nfbs_3d_full/orthogonal_reviews/worst_1_A00060006.png` and identify scalp/neck false positives.
 - Open `docs/assets/quality_warning_rates.png` and explain that warnings are conservative.
 - Open one best and one worst overlay; explain TP, FP, and FN.

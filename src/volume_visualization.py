@@ -13,14 +13,17 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 from src.preprocessing import robust_normalize
 from src.volume_dataset import VolumePair, load_volume_pair
 from src.volume_segmentation import (
+    SPATIAL_PRIOR,
     SpatialPriorConfig,
     VolumeMorphologyConfig,
     segment_volume,
+    spatial_prior_mask,
 )
 
 
@@ -99,6 +102,11 @@ def create_orthogonal_review(
     prediction, _ = segment_volume(
         normalized, method, config, spacing, spatial_config
     )
+    prior = (
+        spatial_prior_mask(image.shape, spacing, spatial_config)
+        if method == SPATIAL_PRIOR
+        else None
+    )
     errors = _error_map(prediction, reference)
     orientations = ((0, "Sagittal"), (1, "Coronal"), (2, "Axial"))
     figure, axes = plt.subplots(3, 3, figsize=(13, 13))
@@ -119,13 +127,43 @@ def create_orthogonal_review(
             axes[row, 1].contour(
                 prediction_slice, levels=[0.5], colors=["magenta"], linewidths=1
             )
-        axes[row, 1].set_title("Overlay: reference=cyan, prediction=magenta")
+        if prior is not None:
+            prior_slice = _slice(prior, axis_index, index)
+            if prior_slice.any() and not prior_slice.all():
+                axes[row, 1].contour(
+                    prior_slice,
+                    levels=[0.5],
+                    colors=["#ffd92f"],
+                    linewidths=1.4,
+                    linestyles=["--"],
+                )
+        axes[row, 1].set_title("Contour overlay")
         axes[row, 2].imshow(
             _slice(errors, axis_index, index), cmap=error_cmap, vmin=0, vmax=3
         )
         axes[row, 2].set_title("Error map")
         for panel in axes[row]:
             panel.axis("off")
+    overlay_handles = [
+        Line2D([], [], color="cyan", label="Reference mask"),
+        Line2D([], [], color="magenta", label="Predicted mask"),
+    ]
+    if prior is not None:
+        overlay_handles.append(
+            Line2D(
+                [],
+                [],
+                color="#ffd92f",
+                linestyle="--",
+                label="Spatial-prior boundary",
+            )
+        )
+    axes[0, 1].legend(
+        handles=overlay_handles,
+        fontsize=7,
+        loc="lower center",
+        framealpha=0.85,
+    )
     axes[0, 2].legend(
         handles=[
             Patch(color="#2ca25f", label="TP: correct brain"),

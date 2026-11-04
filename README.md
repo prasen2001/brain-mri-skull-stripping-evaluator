@@ -64,6 +64,8 @@ Centrality is 1 at the image center and falls toward the corners. Area remains i
 
 The exploratory fourth method encodes a deliberately coarse location hypothesis: after closest-canonical RAS reorientation, most brain tissue should lie in a superior central ellipsoid rather than the inferior neck. It intersects the unchanged morphology prediction with that region, then uses opening and closing radii in millimetres and a minimum component volume in millilitres. It reads array geometry and voxel spacing, never the reference mask.
 
+Its orthogonal review figures draw this ellipsoid as a labeled yellow dashed contour alongside the cyan reference and magenta prediction contours. This makes it possible to see whether an error came from thresholding or from the fixed spatial restriction.
+
 This is more restrictive and less general than the three original baselines. Off-center anatomy, unusual coverage, different orientation handling, pediatric anatomy, lesions, or postoperative changes can violate the prior. It is disabled unless `--include-spatial-prior` is supplied.
 
 ### Prediction-quality warnings
@@ -155,7 +157,7 @@ data/processed/synthstrip_data_v1.5_2d
 python -m pytest -q
 ```
 
-Verified result: `65 passed`.
+Verified result: `66 passed`.
 
 For the complete development checks used in this repository:
 
@@ -166,7 +168,7 @@ mypy src
 python -m pytest -q --cov=src --cov-report=term-missing
 ```
 
-The verified branch coverage was 83.0%, above the enforced 75% project floor. The suite includes subprocess and in-process CLI integration tests, complete visualization/report rendering, external-data preparation, and invalid-input cases.
+The verified branch coverage was 83.1%, above the enforced 75% project floor. The suite includes subprocess and in-process CLI integration tests, complete visualization/report rendering, external-data preparation, and invalid-input cases.
 
 ## Reproduce development tuning
 
@@ -484,7 +486,7 @@ src/volume_segmentation.py          three deterministic 3D baselines
 src/evaluate_3d.py                  complete-volume NFBS CLI
 src/volume_visualization.py         3D aggregate and orthogonal review figures
 streamlit_app.py                    optional public-dataset explorer
-tests/                              65 unit, integration, rendering, and app tests
+tests/                              66 unit, integration, rendering, and app tests
 docs/assets/                        tracked aggregate result charts
 INTERVIEW_PREP.md                   beginner study guide
 PROJECT_REPORT.md                   concise experimental report
